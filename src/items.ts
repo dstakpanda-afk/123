@@ -29,6 +29,13 @@ const AFFIX: { k: StatKey; min: number; max: number }[] = [
 ];
 const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
 let uid = 1;
+export function syncUid(items: Item[]): void { uid = Math.max(uid, ...items.map((i) => i.id + 1)); }
+
+const W: Record<StatKey, number> = { dmg: 100, cdr: 100, hp: 0.4, regen: 10, speed: 60, crit: 100, critDmg: 40, area: 50, proj: 80, steal: 300, armor: 5, xp: 30, magnet: 10, gold: 10, drop: 10 };
+/** prosta ocena do automatycznego zakładania lepszych przedmiotów */
+export function itemScore(it: Item): number {
+  return (Object.keys(it.stats) as StatKey[]).reduce((a, k) => a + (it.stats[k] as number) * W[k], 0);
+}
 
 export function makeItem(ilvl: number, minRarity = 0, slot?: Slot): Item {
   const roll = Math.random() * 100;
