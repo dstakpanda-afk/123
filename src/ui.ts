@@ -28,6 +28,7 @@ export class TreeScene extends Phaser.Scene {
   private info!: Phaser.GameObjects.Container;
   private head!: Phaser.GameObjects.Text;
   private zoom = 0.5;
+  private pinchD = 0;
 
   constructor() { super('tree'); }
   init(d: { run: Run }): void { this.run = d.run; this.sel = null; this.circles.clear(); this.zoom = 0.5; }
@@ -50,7 +51,21 @@ export class TreeScene extends Phaser.Scene {
       if (n.kind === 'n' || n.kind === 'k') this.world.add(this.add.text(n.x, n.y + r + 8, n.name, { fontSize: '11px', color: '#c9d1ee', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5));
     });
 
+    this.input.addPointer(1);
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      const a = this.input.pointer1, b = this.input.pointer2;
+      if (a.isDown && b.isDown) {
+        const d = Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        if (this.pinchD > 0) {
+          const old = this.zoom;
+          this.setZoom(old * (d / this.pinchD));
+          const k = this.zoom / old;
+          this.world.x = mx - (mx - this.world.x) * k; this.world.y = my - (my - this.world.y) * k;
+        }
+        this.pinchD = d;
+        return;
+      }
+      this.pinchD = 0;
       if (!p.isDown || p.y > 520 || p.y < 56) return;
       this.world.x += p.x - p.prevPosition.x; this.world.y += p.y - p.prevPosition.y;
     });

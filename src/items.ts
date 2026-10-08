@@ -12,14 +12,14 @@ const BASE: Record<Slot, [StatKey, number]> = {
   weapon: ['dmg', 0.08], armor: ['hp', 15], amulet: ['crit', 0.03], ring: ['cdr', 0.03], boots: ['speed', 0.05],
 };
 const NOUN: Record<Slot, string[]> = {
-  weapon: ['Miecz', 'Topór', 'Kostur', 'Sztylet'], armor: ['Zbroja', 'Kolczuga', 'Szata', 'Napierśnik'],
-  amulet: ['Amulet', 'Talizman', 'Medalion'], ring: ['Pierścień', 'Sygnet', 'Obrączka'], boots: ['Buty', 'Trzewiki', 'Sandały'],
+  weapon: ['Sztylet Rytualny', 'Kostur Szeptów', 'Kosa', 'Szpon'], armor: ['Szata Kultysty', 'Skóra Głębinowca', 'Pancerz z Chityny', 'Całun'],
+  amulet: ['Oko Pradawnego', 'Znak Starszych', 'Talizman'], ring: ['Sygnet Kultu', 'Pierścień Macki', 'Obrączka Szaleńca'], boots: ['Buty Wędrowca', 'Stopy Cienia', 'Sandały Mgły'],
 };
 const LEGEND: Record<Slot, string[]> = {
-  weapon: ['Ostrze Zmierzchu', 'Kostur Burzy'], armor: ['Skóra Smoka', 'Płaszcz Cienia'],
-  amulet: ['Serce Gwiazdy', 'Oko Wieczności'], ring: ['Pętla Losu', 'Pierścień Ognia i Lodu'], boots: ['Stopy Wichru', 'Buty Wędrowca'],
+  weapon: ['Kostur Czarnej Gwiazdy', 'Dziesiąty Szept'], armor: ['Całun Śniącego', 'Skóra Bezimiennego'],
+  amulet: ['Serce Gwiazdy', 'Oko Bezdennej Nocy'], ring: ['Pętla Szaleństwa', 'Pierścień Siódmej Pieczęci'], boots: ['Kroki Pomiędzy', 'Buty Wędrowca Snów'],
 };
-const SUFFIX = ['Siły', 'Szybkości', 'Mocy', 'Wytrwałości', 'Cienia', 'Płomienia', 'Mrozu', 'Łowcy'];
+const SUFFIX = ['Szaleństwa', 'Pustki', 'Głębin', 'Krwi', 'Gwiazd', 'Cienia', 'Szeptów', 'Zagłady'];
 const AFFIX: { k: StatKey; min: number; max: number }[] = [
   { k: 'dmg', min: 0.04, max: 0.12 }, { k: 'cdr', min: 0.02, max: 0.06 }, { k: 'hp', min: 8, max: 30 },
   { k: 'regen', min: 0.2, max: 0.8 }, { k: 'speed', min: 0.02, max: 0.06 }, { k: 'crit', min: 0.01, max: 0.05 },

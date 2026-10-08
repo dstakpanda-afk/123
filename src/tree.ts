@@ -10,50 +10,50 @@ const N = (name: string, stats: Partial<Stats>, id?: string): Spec => ({ name, s
 const K = (name: string, stats: Partial<Stats>): Spec => ({ name, stats, kind: 'k' });
 
 export const BRANCHES = [
-  { name: 'Łowca', color: 0x4ade80, angle: 0 },
-  { name: 'Strażnik', color: 0xc084fc, angle: 90 },
-  { name: 'Wojownik', color: 0xf87171, angle: 180 },
-  { name: 'Mag', color: 0x60a5fa, angle: 270 },
+  { name: 'Pustka', color: 0x3fe0c5, angle: 0 },
+  { name: 'Głębia', color: 0xa77bff, angle: 90 },
+  { name: 'Krew', color: 0xff4d6d, angle: 180 },
+  { name: 'Gwiazdy', color: 0xffd36b, angle: 270 },
 ];
 const RING = [1, 2, 3, 3, 3, 2, 1];
 
 // każda gałąź: 15 węzłów, kolejno po pierścieniach 1,2,3,3,3,2,1
 const SPECS: Spec[][] = [
-  [ // Łowca
-    n('Zwinność', { speed: 0.04 }),
-    n('Szybkie dłonie', { cdr: 0.03 }), n('Oko sokoła', { crit: 0.02 }),
-    n('Instynkt łowcy', { drop: 0.08 }), N('Grot', { proj: 1, dmg: 0.05 }, 'k_arrow'), n('Lekkie buty', { speed: 0.04 }),
-    n('Zbieracz', { magnet: 0.25 }), N('Wielostrzał', { proj: 1 }), n('Szczęście', { gold: 0.1 }),
-    n('Precyzja', { crit: 0.03 }), N('Mistrz łuku', { dmg: 0.12, cdr: 0.06 }), n('Poszukiwacz', { drop: 0.08 }),
-    N('Wiatr w plecy', { speed: 0.1, cdr: 0.05 }), N('Skarbnik', { gold: 0.25, drop: 0.15 }),
-    K('Deszcz Strzał', { proj: 2, dmg: -0.15 }),
+  [ // Pustka (Łowca)
+    n('Chód cienia', { speed: 0.04 }),
+    n('Szybkie szepty', { cdr: 0.03 }), n('Oko w ciemności', { crit: 0.02 }),
+    n('Węch padlinożercy', { drop: 0.08 }), N('Grot Pustki', { proj: 1, dmg: 0.05 }, 'k_arrow'), n('Lekkie kroki', { speed: 0.04 }),
+    n('Zbieracz Reliktów', { magnet: 0.25 }), N('Rozszczepiony Szept', { proj: 1 }), n('Szczęście Szaleńca', { gold: 0.1 }),
+    n('Zimna precyzja', { crit: 0.03 }), N('Mistrz Nicości', { dmg: 0.12, cdr: 0.06 }), n('Poszukiwacz Skarbów', { drop: 0.08 }),
+    N('Wiatr Pomiędzy', { speed: 0.1, cdr: 0.05 }), N('Skarbnik Otchłani', { gold: 0.25, drop: 0.15 }),
+    K('Rozszczepienie Pustki', { proj: 2, dmg: -0.15 }),
   ],
-  [ // Strażnik
+  [ // Głębia (Strażnik)
     n('Hart ducha', { hp: 10 }),
-    n('Odnowa', { regen: 0.3 }), n('Tarcza', { armor: 1 }),
-    n('Wampiryzm', { steal: 0.01 }), N('Bastion', { armor: 2, hp: 20 }), N('Życiodajny', { regen: 0.5, hp: 15 }, 'k_life'),
-    n('Hart', { hp: 25 }), N('Kamienna skóra', { armor: 3 }), n('Regeneracja', { regen: 0.5 }),
-    N('Krew za krew', { steal: 0.02, dmg: 0.06 }), N('Twierdza', { hp: 50, armor: 2 }), n('Oddech życia', { regen: 0.6 }),
-    N('Nieśmiertelny', { hp: 60, regen: 1 }), N('Pożeracz', { steal: 0.03, crit: 0.03 }),
-    K('Wieczny Strażnik', { hp: 150, armor: 5, speed: -0.15 }),
+    n('Powolne gojenie', { regen: 0.3 }), n('Skorupa', { armor: 1 }),
+    n('Krwiopijca', { steal: 0.01 }), N('Chitynowy Bastion', { armor: 2, hp: 20 }), N('Dar Głębi', { regen: 0.5, hp: 15 }, 'k_life'),
+    n('Twarde ciało', { hp: 25 }), N('Kamienna Skóra', { armor: 3 }), n('Odrost', { regen: 0.5 }),
+    N('Krew za Krew', { steal: 0.02, dmg: 0.06 }), N('Twierdza Snu', { hp: 50, armor: 2 }), n('Oddech Głębin', { regen: 0.6 }),
+    N('Nieśmiertelny Sługa', { hp: 60, regen: 1 }), N('Pożeracz Głębin', { steal: 0.03, crit: 0.03 }, 'k_deep'),
+    K('Pradawny Kolos', { hp: 150, armor: 5, speed: -0.15 }),
   ],
-  [ // Wojownik
-    n('Krzepa', { dmg: 0.05 }),
-    n('Silny cios', { dmg: 0.06 }), n('Twarda skóra', { hp: 15 }),
-    n('Furia', { crit: 0.03 }), N('Szlif ostrza', { dmg: 0.12, area: 0.08 }, 'k_edge'), n('Pancerz', { armor: 1 }),
-    n('Rzeźnik', { critDmg: 0.15 }), N('Kometa', { dmg: 0.1, cdr: 0.05 }, 'k_comet'), n('Wytrzymałość', { hp: 20 }),
-    n('Krwawy szał', { dmg: 0.06 }), N('Mistrz walki', { dmg: 0.15, crit: 0.03 }), n('Żelazna wola', { hp: 25 }),
-    N('Zabójcza precyzja', { crit: 0.06, critDmg: 0.25 }), N('Berserker', { dmg: 0.18, speed: 0.05 }),
-    K('Szał Bojowy', { dmg: 0.6, hp: -30 }),
+  [ // Krew (Wojownik)
+    n('Żar w żyłach', { dmg: 0.05 }),
+    n('Brutalny cios', { dmg: 0.06 }), n('Twarda skóra', { hp: 15 }),
+    n('Szał ofiarny', { crit: 0.03 }), N('Szlif Sztyletu', { dmg: 0.12, area: 0.08 }, 'k_edge'), n('Pancerz z kości', { armor: 1 }),
+    n('Rzeźnik', { critDmg: 0.15 }), N('Szkarłatna Kometa', { dmg: 0.1, cdr: 0.05 }, 'k_comet'), n('Wytrzymałość', { hp: 20 }),
+    n('Krwawy szał', { dmg: 0.06 }), N('Arcykapłan Ofiary', { dmg: 0.15, crit: 0.03 }), n('Żelazna wola', { hp: 25 }),
+    N('Zabójcza Precyzja', { crit: 0.06, critDmg: 0.25 }), N('Berserker Kultu', { dmg: 0.18, speed: 0.05 }),
+    K('Pakt Krwi', { dmg: 0.6, hp: -30 }),
   ],
-  [ // Mag
-    n('Iskra', { cdr: 0.03 }),
-    n('Wiedza', { xp: 0.06 }), n('Zasięg', { area: 0.06 }),
-    N('Płomień', { dmg: 0.08, area: 0.08 }, 'k_flame'), n('Mądrość', { xp: 0.08 }), N('Mróz', { cdr: 0.05, area: 0.06 }, 'k_frost'),
-    n('Skupienie', { cdr: 0.04 }), N('Burza', { dmg: 0.1, proj: 1 }, 'k_storm'), n('Rozległość', { area: 0.08 }),
-    n('Arkana', { dmg: 0.06 }), N('Arcymag', { cdr: 0.08, area: 0.1 }), n('Medytacja', { regen: 0.5 }),
-    N('Przepływ many', { cdr: 0.1, xp: 0.1 }), N('Potęga żywiołów', { dmg: 0.16, area: 0.1 }),
-    K('Osobliwość', { area: 0.4, cdr: 0.15, hp: -20 }),
+  [ // Gwiazdy (Mag)
+    n('Iskra z nieba', { cdr: 0.03 }),
+    n('Zakazana wiedza', { xp: 0.06 }), n('Daleki zasięg', { area: 0.06 }),
+    N('Płomień Gwiazdy', { dmg: 0.08, area: 0.08 }, 'k_flame'), n('Mądrość Starych', { xp: 0.08 }), N('Chłód Kosmosu', { cdr: 0.05, area: 0.06 }, 'k_frost'),
+    n('Skupienie', { cdr: 0.04 }), N('Burza Gwiazd', { dmg: 0.1, proj: 1 }, 'k_storm'), n('Rozległość', { area: 0.08 }),
+    n('Arkana', { dmg: 0.06 }), N('Astrolog', { cdr: 0.08, area: 0.1 }), n('Medytacja', { regen: 0.5 }),
+    N('Przepływ Eteru', { cdr: 0.1, xp: 0.1 }), N('Potęga Żywiołów', { dmg: 0.16, area: 0.1 }),
+    K('Czarna Gwiazda', { area: 0.4, cdr: 0.15, hp: -20 }),
   ],
 ];
 

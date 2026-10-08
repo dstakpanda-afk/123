@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { MetaState, SKILLS, SkillId, loadMeta, saveMeta } from './data';
+import { CLASSES, ClassId, MetaState, SKILLS, SkillId, loadMeta, saveMeta } from './data';
 import { RARITY_COLOR, Item, makeItem } from './items';
 import { Run } from './run';
 
@@ -33,8 +33,8 @@ export class GameScene extends Phaser.Scene {
 
   constructor() { super('game'); }
 
-  init(data: { meta?: MetaState }): void {
-    this.run = Run.starter(data.meta ?? loadMeta());
+  init(data: { meta?: MetaState; cls?: ClassId }): void {
+    this.run = Run.starter(data.meta ?? loadMeta(), data.cls ?? 'blood');
     this.hp = this.run.maxHp;
     this.invuln = 0; this.level = 1; this.xp = 0; this.time_ = 0; this.kills = 0; this.spawnT = 0; this.eliteT = 40; this.regenAcc = 0;
     this.enemies = []; this.gems = []; this.shots = []; this.drops = []; this.states = [];
@@ -44,9 +44,10 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     const { width: w, height: h } = this.scale;
     const g = this.add.graphics();
-    g.lineStyle(1, 0x1c2238).strokeRect(0, 0, 64, 64).generateTexture('grid', 64, 64); g.destroy();
+    g.lineStyle(1, 0x1d1633).strokeRect(0, 0, 64, 64).generateTexture('grid', 64, 64); g.destroy();
     this.bg = this.add.tileSprite(0, 0, w, h, 'grid').setOrigin(0).setScrollFactor(0);
-    this.player = this.add.circle(0, 0, 12, 0x4ade80).setStrokeStyle(2, 0xffffff).setDepth(10);
+    this.cameras.main.setBackgroundColor(0x0a0814);
+    this.player = this.add.circle(0, 0, 12, CLASSES[this.run.cls].color).setStrokeStyle(2, 0xffffff).setDepth(10);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
 
     this.bars = this.add.graphics().setScrollFactor(0).setDepth(100);
@@ -152,10 +153,10 @@ export class GameScene extends Phaser.Scene {
 
   private addEnemy(elite: boolean): void {
     const t = this.time_, roll = Math.random(), scale = 1 + (t / 60) * 0.45;
-    let r = 10, hp = 12, speed = 55, dmg = 8, color = 0xe74c3c, xp = 1;
+    let r = 10, hp = 12, speed = 55, dmg = 8, color = 0xb03a5b, xp = 1;
     if (elite) { r = 22; hp = 150; speed = 50; dmg = 14; color = 0xff9f1a; xp = 12; }
-    else if (t > 40 && roll < 0.25) { r = 8; hp = 7; speed = 95; dmg = 6; color = 0xf1c40f; }
-    else if (t > 90 && roll < 0.4) { r = 18; hp = 60; speed = 38; dmg = 16; color = 0x9b59b6; xp = 4; }
+    else if (t > 40 && roll < 0.25) { r = 8; hp = 7; speed = 95; dmg = 6; color = 0x3fb8a0; }
+    else if (t > 90 && roll < 0.4) { r = 18; hp = 60; speed = 38; dmg = 16; color = 0x6b4aa0; xp = 4; }
     const a = Math.random() * Math.PI * 2;
     const obj = this.add.circle(this.player.x + Math.cos(a) * 400, this.player.y + Math.sin(a) * 400, r, color).setDepth(5);
     if (elite) obj.setStrokeStyle(3, 0xffffff);
@@ -249,6 +250,24 @@ export class GameScene extends Phaser.Scene {
           this.tweens.add({ targets: boom, alpha: 0, scale: 1.3, duration: 300, onComplete: () => boom.destroy() });
         });
       }
+    } else if (s.id === 'tentacles') {
+      const pool = this.enemies.filter((e) => this.dist(P, e.obj) < 230 * area);
+      if (!pool.length) return;
+      s.cd = 2.2 * cdm;
+      const n = Math.min(pool.length, 2 + Math.floor(lv / 2) + extra + (ev ? 3 : 0));
+      const g = this.add.graphics().setDepth(11);
+      g.lineStyle(4, SKILLS.tentacles.color, 0.9);
+      Phaser.Utils.Array.Shuffle(pool).slice(0, n).forEach((e) => {
+        const ex = e.obj.x, ey = e.obj.y, mx = (P.x + ex) / 2 + (Math.random() - 0.5) * 60, my = (P.y + ey) / 2 + (Math.random() - 0.5) * 60;
+        g.strokePoints(new Phaser.Curves.QuadraticBezier(new Phaser.Math.Vector2(P.x, P.y), new Phaser.Math.Vector2(mx, my), new Phaser.Math.Vector2(ex, ey)).getPoints(14));
+        this.hurt(e, (15 + 5 * lv) * (ev ? 1.4 : 1));
+        if (e.hp > 0) {
+          const a = Math.atan2(P.y - e.obj.y, P.x - e.obj.x);
+          e.obj.x += Math.cos(a) * 28; e.obj.y += Math.sin(a) * 28;
+          if (ev) e.slowT = 2;
+        }
+      });
+      this.tweens.add({ targets: g, alpha: 0, duration: 220, onComplete: () => g.destroy() });
     } else if (s.id === 'heal') {
       s.cd = 6 * cdm;
       this.heal(Math.round(this.run.maxHp * (0.04 + 0.02 * lv)));

@@ -1,4 +1,4 @@
-import { BASE_STATS, MAX_SKILL, MetaState, SKILL_IDS, SkillId, SKILLS, StatKey, Stats } from './data';
+import { BASE_STATS, CLASSES, ClassId, MAX_SKILL, MetaState, SKILL_IDS, SkillId, SKILLS, StatKey, Stats } from './data';
 import { Item, Slot, makeItem, sellValue } from './items';
 import { NODES } from './tree';
 
@@ -15,11 +15,18 @@ export class Run {
   stats: Stats = { ...BASE_STATS };
   maxHp = 100;
 
-  constructor(public meta: MetaState) { this.recalc(); }
+  constructor(public meta: MetaState, public cls: ClassId = 'blood') {
+    const c = CLASSES[cls];
+    this.skills = Object.fromEntries(SKILL_IDS.map((id) => [id, { lvl: id === c.skill ? 1 : 0, evolved: false }])) as typeof this.skills;
+    this.slots = [c.skill, null, null];
+    this.alloc.add(c.startNode);
+    this.recalc();
+  }
 
   recalc(): void {
     const s: Stats = { ...BASE_STATS };
     const add = (p: Partial<Stats>) => (Object.keys(p) as StatKey[]).forEach((k) => { s[k] += p[k] as number; });
+    add(CLASSES[this.cls].stats);
     add({ dmg: 0.08 * this.meta.dmg, speed: 0.05 * this.meta.spd, hp: 10 * this.meta.hp });
     this.alloc.forEach((id) => add(NODES[id].stats));
     Object.values(this.equipped).forEach((it) => it && add(it.stats));
@@ -84,5 +91,5 @@ export class Run {
     this.bag = this.bag.filter((b) => b !== it);
     if (this.equipped[it.slot] === it) { delete this.equipped[it.slot]; this.recalc(); }
   }
-  static starter(meta: MetaState): Run { const r = new Run(meta); r.addItem(makeItem(1, 0, 'weapon')); return r; }
+  static starter(meta: MetaState, cls: ClassId): Run { const r = new Run(meta, cls); r.addItem(makeItem(1, 0, 'weapon')); return r; }
 }
