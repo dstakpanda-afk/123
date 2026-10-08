@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Evolution ARPG</string>
+    <string name="title_activity_main">Evolution ARPG</string>
+    <string name="package_name">pl.pandacare.evolution</string>
+    <string name="custom_url_scheme">pl.pandacare.evolution</string>
+</resources>
