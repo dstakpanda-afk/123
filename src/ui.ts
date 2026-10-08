@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
-import { ATTACK_IDS, CLASSES, KIND_NAME, MAX_SKILL, SKILLS, SKILL_IDS, UTILITY_IDS, STAT_LABEL, StatKey, SUPPORTS, SUPPORT_IDS, fmtStat, fmtStats } from './data';
+import { ACHIEVEMENTS, ATTACK_IDS, BOSSES, BOSS_POINTS, CLASSES, KIND_NAME, MAX_SKILL, SKILLS, SKILL_IDS, UTILITY_IDS, STAT_LABEL, StatKey, SUPPORTS, SUPPORT_IDS, fmtStat, fmtStats } from './data';
 import { BAG_SIZE, Character, getChar } from './char';
 import { Item, RARITY_COLOR, RARITY_NAME, SLOTS, SLOT_NAME, makeItem, sellValue } from './items';
-import { NODES, NODE_LIST, SECTORS, TreeNode, sectorColor } from './tree';
+import { CLASS_START, KR, NODES, NODE_LIST, R, SECTORS, TreeNode, sectorColor } from './tree';
 import { H, S, W, hex, setupCam, spr } from './gfx';
+import { describeSkill } from './skills';
 
 function btn(scene: Phaser.Scene, x: number, y: number, w: number, h: number, label: string, cb: () => void, fill = 0x22304f, stroke = 0x4d6bb3, size = 14): Phaser.GameObjects.GameObject[] {
   const r = scene.add.rectangle(x, y, w, h, fill).setStrokeStyle(2, stroke).setInteractive();
@@ -14,6 +15,8 @@ function btn(scene: Phaser.Scene, x: number, y: number, w: number, h: number, la
 const home = (s: Phaser.Scene) => s.scene.start('menu');
 function char(): Character { return getChar() as Character; }
 function base(s: Phaser.Scene): void { setupCam(s); s.add.rectangle(0, 0, W, H, 0x0a0814).setOrigin(0).setInteractive(); }
+
+const rad = (d: number) => (d * Math.PI) / 180;
 
 // ================= DRZEWKO =================
 const FILTERS = Object.keys(STAT_LABEL) as StatKey[];
@@ -30,29 +33,42 @@ export class TreeScene extends Phaser.Scene {
   private head!: Phaser.GameObjects.Text;
   private filterBtn!: Phaser.GameObjects.Text;
   private resetBtn!: Phaser.GameObjects.Text;
-  private zoom = 0.6;
+  private zoom = 0.7;
   private pinchD = 0;
   private filter = -1;
   private resetArmed = false;
 
   constructor() { super('tree'); }
-  init(): void { this.c = char(); this.sel = null; this.path = null; this.circles.clear(); this.labels = []; this.zoom = 0.6; this.filter = -1; this.resetArmed = false; this.pinchD = 0; }
+  init(): void { this.c = char(); this.sel = null; this.path = null; this.circles.clear(); this.labels = []; this.zoom = 0.7; this.filter = -1; this.resetArmed = false; this.pinchD = 0; }
 
   create(): void {
     base(this);
     this.world = this.add.container(0, 0).setScale(this.zoom);
+    // tło: kolorowe klinki sektorów i prowadnice pierścieni
+    const deco = this.add.graphics();
+    SECTORS.forEach((_cid, i) => {
+      const a0 = rad(-120 + 60 * i), a1 = rad(-60 + 60 * i);
+      deco.fillStyle(sectorColor(i), 0.05).slice(0, 0, KR + 90, a0, a1).fillPath();
+      deco.lineStyle(2, sectorColor(i), 0.18).lineBetween(0, 0, Math.cos(a0) * (KR + 90), Math.sin(a0) * (KR + 90));
+    });
+    for (let k = 1; k <= 7; k++) deco.lineStyle(2, 0x2a2f55, 0.55).strokeCircle(0, 0, R(k));
+    deco.lineStyle(3, 0x3a3f70, 0.7).strokeCircle(0, 0, KR + 40);
+    this.world.add(deco);
     this.links = this.add.graphics();
     this.world.add(this.links);
     SECTORS.forEach((cid, s) => {
       const a = ((-90 + 60 * s) * Math.PI) / 180;
-      this.world.add(this.add.text(Math.cos(a) * 880, Math.sin(a) * 880, CLASSES[cid].region.toUpperCase(), { fontSize: '34px', color: hex(sectorColor(s)), fontStyle: 'bold' }).setOrigin(0.5).setAlpha(0.6));
+      this.world.add(this.add.text(Math.cos(a) * (KR + 120), Math.sin(a) * (KR + 120), CLASSES[cid].region.toUpperCase(), { fontSize: '40px', color: hex(sectorColor(s)), fontStyle: 'bold' }).setOrigin(0.5).setAlpha(0.7));
     });
+    const startClass = Object.fromEntries(Object.entries(CLASS_START).map(([cid, id]) => [id, cid])) as Record<string, keyof typeof CLASSES>;
     NODE_LIST.forEach((n) => {
-      const r = n.kind === 'k' ? 21 : n.kind === 'n' ? 15 : n.kind === 'start' ? 19 : 10;
+      const r = n.kind === 'k' ? 20 : n.kind === 'n' ? 14 : n.kind === 'start' ? 20 : n.id === 'c' ? 22 : 9;
+      if (n.kind === 'k') this.world.add(this.add.star(n.x, n.y, 4, 22, 34, 0xffffff, 0.12).setStrokeStyle(2, 0xffffff, 0.35));
       const circ = this.add.circle(n.x, n.y, r, 0x232a4a).setStrokeStyle(3, 0x5a6392).setInteractive(new Phaser.Geom.Circle(r, r, r + 14), Phaser.Geom.Circle.Contains);
       circ.on('pointerup', (p: Phaser.Input.Pointer) => { if (Phaser.Math.Distance.Between(p.downX, p.downY, p.upX, p.upY) < 10 * S) this.select(n.id); });
       this.circles.set(n.id, circ);
       this.world.add(circ);
+      if (n.kind === 'start') this.world.add(spr(this, n.x, n.y, `pl_${startClass[n.id]}`).setScale(0.95 / S));
       if (n.kind === 'n' || n.kind === 'k') {
         const t = this.add.text(n.x, n.y + r + 9, n.name, { fontSize: '13px', color: '#e4e9ff', stroke: '#000', strokeThickness: 4, fontStyle: 'bold' }).setOrigin(0.5);
         this.labels.push(t); this.world.add(t);
@@ -232,10 +248,11 @@ export class SkillsScene extends Phaser.Scene {
   private c!: Character;
   private sel: Sel = null;
   private note = '';
+  private view: 'list' | 'summary' = 'list';
   private layer!: Phaser.GameObjects.Container;
 
   constructor() { super('skills'); }
-  init(): void { this.c = char(); this.sel = null; this.note = ''; }
+  init(): void { this.c = char(); this.sel = null; this.note = ''; this.view = 'list'; }
 
   create(): void {
     base(this);
@@ -253,6 +270,7 @@ export class SkillsScene extends Phaser.Scene {
   private render(): void {
     const c = this.c, sel = this.sel;
     this.layer.removeAll(true);
+    if (this.view === 'summary' && sel && sel.idx === null && c.loadout[sel.slot].skill) { this.summary(sel.slot); return; }
     this.put(this.add.text(10, 14, 'UMIEJĘTNOŚCI', { fontSize: '19px', color: '#c9a4ff', fontStyle: 'bold' }));
     this.put(btn(this, 330, 24, 50, 32, 'X', () => home(this), 0x4a2226, 0xc0392b, 15));
     this.put(this.add.text(12, 50, 'Główne ataki (po 5 supportów)', { fontSize: '12px', color: '#a8b0d0' }));
@@ -260,7 +278,7 @@ export class SkillsScene extends Phaser.Scene {
       const y = 80 + i * 40 + (i >= 3 ? 24 : 0);
       if (i === 3) this.put(this.add.text(12, y - 33, 'Pomocnicze (po 2 supporty)', { fontSize: '12px', color: '#a8b0d0' }));
       const sd = lo.skill ? SKILLS[lo.skill] : null;
-      this.tile(62, y, 108, 38, sd ? sd.color : 0x2a3050, !!sel && sel.slot === i && sel.idx === null, () => { this.sel = { slot: i, idx: null }; this.note = ''; this.render(); });
+      this.tile(62, y, 108, 38, sd ? sd.color : 0x2a3050, !!sel && sel.slot === i && sel.idx === null, () => { this.sel = { slot: i, idx: null }; this.note = ''; this.view = lo.skill ? 'summary' : 'list'; this.render(); });
       if (sd && lo.skill) {
         this.put(spr(this, 26, y, `ic_${lo.skill}`).setScale(32 / 44 / S));
         this.put(this.add.text(45, y, sd.name, { fontSize: '10px', color: hex(sd.color), fontStyle: 'bold', wordWrap: { width: 66 } }).setOrigin(0, 0.5));
@@ -315,7 +333,7 @@ export class SkillsScene extends Phaser.Scene {
       (sel ? (sel.slot < 3 ? ATTACK_IDS : UTILITY_IDS) : SKILL_IDS).filter((id) => c.skills[id] > 0).forEach((id, i) => {
         const { x, y } = cell(i), d = SKILLS[id];
         this.tile(x, y, 84, 64, d.color, false, () => {
-          if (sel && sel.idx === null) { c.setSkill(sel.slot, id); c.save(); this.note = ''; } else this.note = `${d.name}: ${d.desc}`;
+          if (sel && sel.idx === null) { c.setSkill(sel.slot, id); c.save(); this.note = ''; this.view = 'summary'; } else this.note = `${d.name}: ${d.desc}`;
           this.render();
         });
         this.put(spr(this, x - 22, y - 14, `ic_${id}`).setScale(30 / 44 / S));
@@ -324,6 +342,40 @@ export class SkillsScene extends Phaser.Scene {
         this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: hex(d.color), align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
       });
     }
+  }
+
+  /** pełnoekranowe podsumowanie gemu razem z supportami */
+  private summary(slot: number): void {
+    const c = this.c, lo = c.loadout[slot], id = lo.skill as NonNullable<typeof lo.skill>;
+    const sm = describeSkill(id, c.skills[id], lo.sup, c.stats);
+    this.put(this.add.text(10, 14, 'PODSUMOWANIE', { fontSize: '19px', color: '#c9a4ff', fontStyle: 'bold' }));
+    this.put(btn(this, 330, 24, 50, 32, 'X', () => { this.view = 'list'; this.render(); }, 0x4a2226, 0xc0392b, 15));
+    this.put(spr(this, 34, 84, `ic_${id}`).setScale(48 / 44 / S));
+    this.put(this.add.text(68, 66, sm.title, { fontSize: '18px', color: hex(sm.color), fontStyle: 'bold' }));
+    this.put(this.add.text(68, 90, `${sm.kind} · poziom ${sm.level}/${MAX_SKILL}`, { fontSize: '12px', color: '#a8b0d0' }));
+    this.put(this.add.text(12, 116, sm.desc, { fontSize: '12px', color: '#d6d0ee', wordWrap: { width: 336 } }));
+    this.put(this.add.text(12, 148, 'Efekt końcowy (z postacią i supportami)', { fontSize: '11px', color: '#8f86b3' }));
+    let y = 168;
+    sm.lines.forEach(([k, v]) => {
+      this.put(this.add.rectangle(W / 2, y + 10, 340, 21, 0x141a30, 0.9));
+      this.put(this.add.text(14, y + 10, k, { fontSize: '12px', color: '#a8b0d0' }).setOrigin(0, 0.5));
+      this.put(this.add.text(346, y + 10, v, { fontSize: '13px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0.5));
+      y += 23;
+    });
+    y += 8;
+    this.put(this.add.text(12, y, `Supporty (${sm.supports.length}/${lo.sup.length})`, { fontSize: '11px', color: '#8f86b3' }));
+    y += 18;
+    if (!sm.supports.length) this.put(this.add.text(14, y, 'Brak. Włóż supporty w sloty obok gemu.', { fontSize: '12px', color: '#6f6896' }));
+    sm.supports.forEach((sp) => {
+      const t = this.add.text(48, y, `${sp.works ? '✓' : '✗'} ${sp.name}: ${sp.text}`, { fontSize: '11px', color: sp.works ? '#e4e9ff' : '#ff8a8a', wordWrap: { width: 300 } });
+      this.put(this.add.rectangle(27, y + 9, 30, 18, 0x141a30).setStrokeStyle(2, sp.color));
+      const short = Object.values(SUPPORTS).find((x) => x.name === sp.name)?.short ?? '';
+      this.put(this.add.text(27, y + 9, short, { fontSize: '11px', color: hex(sp.color), fontStyle: 'bold' }).setOrigin(0.5));
+      this.put(t);
+      y += Math.max(24, t.height + 6);
+    });
+    this.put(btn(this, 100, 612, 160, 36, 'ZMIEŃ GEM', () => { this.view = 'list'; this.render(); }, 0x22304f, 0x4d6bb3, 13));
+    this.put(btn(this, 262, 612, 160, 36, 'ZDEJMIJ', () => { c.setSkill(slot, null); c.save(); this.view = 'list'; this.render(); }, 0x3a2226, 0x9b4d57, 13));
   }
 }
 
@@ -375,5 +427,60 @@ export class ShopScene extends Phaser.Scene {
       }, ok ? 0x2b5a3a : 0x22242f, ok ? 0x4ade80 : 0x40466a, 15));
     });
     put(this.add.text(W / 2, 490, this.msg, { fontSize: '15px', color: '#ffd86b', align: 'center', wordWrap: { width: 320 }, fontStyle: 'bold' }).setOrigin(0.5));
+  }
+}
+
+// ================= OSIĄGNIĘCIA I BOSSOWIE =================
+export class AchScene extends Phaser.Scene {
+  private c!: Character;
+  private list!: Phaser.GameObjects.Container;
+  private maxScroll = 0;
+
+  constructor() { super('ach'); }
+  init(): void { this.c = char(); }
+
+  create(): void {
+    base(this);
+    const c = this.c;
+    if (c.checkAchievements().length) c.save();
+    this.list = this.add.container(0, 0);
+    let y = 78;
+    const section = (t: string) => { this.list.add(this.add.text(12, y, t, { fontSize: '13px', color: '#8f86b3', fontStyle: 'bold' })); y += 24; };
+    const row = (name: string, desc: string, done: boolean, prog: number, right: string, rightColor: string) => {
+      this.list.add(this.add.rectangle(W / 2, y + 22, 340, 46, done ? 0x16301f : 0x141a30).setStrokeStyle(2, done ? 0x4ade80 : 0x2a3050));
+      this.list.add(this.add.text(20, y + 9, `${done ? '✓ ' : ''}${name}`, { fontSize: '14px', color: done ? '#7be8a8' : '#fff', fontStyle: 'bold' }));
+      this.list.add(this.add.text(20, y + 28, desc, { fontSize: '11px', color: '#a8b0d0' }));
+      if (!done && prog >= 0) {
+        this.list.add(this.add.rectangle(270, y + 33, 80, 6, 0x000000).setOrigin(0, 0.5));
+        this.list.add(this.add.rectangle(270, y + 33, 80 * Math.min(1, prog), 6, 0xffd86b).setOrigin(0, 0.5));
+      }
+      this.list.add(this.add.text(344, y + 10, right, { fontSize: '13px', color: rightColor, fontStyle: 'bold' }).setOrigin(1, 0));
+      y += 52;
+    };
+    section(`BOSSOWIE: pierwsze pokonanie daje +${BOSS_POINTS} pkt`);
+    BOSSES.forEach((b) => {
+      const done = !!c.bosses[b.id], locked = c.level < b.minLevel;
+      row(b.name, locked ? `Odblokowuje się na poziomie ${b.minLevel}` : done ? 'Pokonany' : 'Czeka w wielkiej wyprawie', done, -1, done ? `+${BOSS_POINTS}` : locked ? `poz. ${b.minLevel}` : `+${BOSS_POINTS} pkt`, done ? '#7be8a8' : locked ? '#6f6896' : '#ffd86b');
+    });
+    y += 6;
+    section('OSIĄGNIĘCIA');
+    ACHIEVEMENTS.forEach((a) => {
+      const done = !!c.done[a.id], v = a.value(c.totals, c.level);
+      row(a.name, done ? a.desc : `${a.desc}  (${Math.min(v, a.goal)}/${a.goal})`, done, v / a.goal, `+${a.pts} pkt`, done ? '#7be8a8' : '#ffd86b');
+    });
+    this.maxScroll = Math.max(0, y - (H - 20));
+
+    const earned = ACHIEVEMENTS.filter((a) => c.done[a.id]).reduce((n, a) => n + a.pts, 0) + BOSSES.filter((b) => c.bosses[b.id]).length * BOSS_POINTS;
+    const total = ACHIEVEMENTS.reduce((n, a) => n + a.pts, 0) + BOSSES.length * BOSS_POINTS;
+    this.add.rectangle(0, 0, W, 62, 0x0a0814).setOrigin(0).setInteractive();
+    this.add.text(10, 12, 'OSIĄGNIĘCIA', { fontSize: '19px', color: '#c9a4ff', fontStyle: 'bold' });
+    this.add.text(10, 38, `Zdobyte punkty drzewka: ${earned} / ${total}`, { fontSize: '12px', color: '#ffd86b' });
+    btn(this, 330, 24, 50, 32, 'X', () => home(this), 0x4a2226, 0xc0392b, 15);
+
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (!p.isDown) return;
+      this.list.y = Phaser.Math.Clamp(this.list.y + (p.y - p.prevPosition.y) / S, -this.maxScroll, 0);
+    });
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => { this.list.y = Phaser.Math.Clamp(this.list.y - dy * 0.5, -this.maxScroll, 0); });
   }
 }

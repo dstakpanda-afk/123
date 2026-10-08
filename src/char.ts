@@ -1,6 +1,6 @@
-import { BASE_STATS, CLASSES, ClassId, MAX_SKILL, SKILLS, SKILL_IDS, SUPPORT_IDS, SkillId, StatKey, Stats, SupportId, xpNeed } from './data';
+import { ACHIEVEMENTS, Achievement, BOSS_POINTS, BASE_STATS, CLASSES, ClassId, MAX_SKILL, NO_TOTALS, SKILLS, SKILL_IDS, SUPPORT_IDS, SkillId, StatKey, Stats, SupportId, Totals, xpNeed } from './data';
 import { Item, Slot, itemScore, makeItem, sellValue, syncUid } from './items';
-import { CLASS_START, NODES } from './tree';
+import { CLASS_START, NODES, TREE_VERSION } from './tree';
 
 export const BAG_SIZE = 24;
 export const SUPPORT_BAG = 40;
@@ -13,7 +13,10 @@ export const MAIN_SLOTS = 3;
 export const newLoadout = (): LoadoutSlot[] => [5, 5, 5, 2, 2, 2].map((n) => ({ skill: null, sup: new Array(n).fill(null) }));
 
 export class Character {
-  points = 0; gold = 200; runs = 0; wins = 0; level = 1; xp = 0;
+  points = 0; pointsTotal = 0; gold = 200; runs = 0; wins = 0; level = 1; xp = 0;
+  totals: Totals = { ...NO_TOTALS };
+  done: Record<string, boolean> = {};
+  bosses: Record<string, boolean> = {};
   alloc = new Set<string>();
   skills = Object.fromEntries(SKILL_IDS.map((id) => [id, 0])) as Record<SkillId, number>;
   supportBag: SupportId[] = [];
@@ -40,8 +43,24 @@ export class Character {
   gainXp(n: number): number {
     this.xp += n;
     let gained = 0;
-    while (this.xp >= xpNeed(this.level)) { this.xp -= xpNeed(this.level); this.level++; this.points++; gained++; }
+    while (this.xp >= xpNeed(this.level)) { this.xp -= xpNeed(this.level); this.level++; this.addPoints(1); gained++; }
     return gained;
+  }
+  addPoints(n: number): void { this.points += n; this.pointsTotal += n; }
+
+  /** przyznaje punkty za nowe osiągnięcia; zwraca odblokowane */
+  checkAchievements(): Achievement[] {
+    const got: Achievement[] = [];
+    for (const a of ACHIEVEMENTS) {
+      if (this.done[a.id] || a.value(this.totals, this.level) < a.goal) continue;
+      this.done[a.id] = true; this.addPoints(a.pts); got.push(a);
+    }
+    return got;
+  }
+  /** pierwsze pokonanie bossa daje punkty; zwraca true, jeśli to było pierwsze */
+  markBoss(id: string): boolean {
+    if (this.bosses[id]) return false;
+    this.bosses[id] = true; this.addPoints(BOSS_POINTS); return true;
   }
 
   recalc(): void {
@@ -121,7 +140,9 @@ export class Character {
       return 'new';
     }
     if (this.skills[id] >= MAX_SKILL) { this.gold += 20; return 'max'; }
-    this.skills[id]++; return 'up';
+    this.skills[id]++;
+    if (this.skills[id] >= MAX_SKILL) this.totals.maxSkill = 1;
+    return 'up';
   }
   addSupportGem(id: SupportId): 'bag' | 'sold' {
     if (this.supportBag.length >= SUPPORT_BAG) { this.gold += 15; return 'sold'; }
@@ -180,7 +201,7 @@ export class Character {
   save(): void {
     try {
       localStorage.setItem(KEY, JSON.stringify({
-        v: VERSION, cls: this.cls, points: this.points, gold: this.gold, runs: this.runs, wins: this.wins, level: this.level, xp: this.xp,
+        v: VERSION, treeV: TREE_VERSION, pointsTotal: this.pointsTotal, totals: this.totals, done: this.done, bosses: this.bosses, cls: this.cls, points: this.points, gold: this.gold, runs: this.runs, wins: this.wins, level: this.level, xp: this.xp,
         alloc: [...this.alloc], skills: this.skills, supportBag: this.supportBag, loadout: this.loadout, equipped: this.equipped, bag: this.bag,
       }));
     } catch { /* brak dostępu do storage */ }
@@ -193,7 +214,10 @@ export class Character {
       if (d.v !== VERSION || !CLASSES[d.cls as ClassId]) return null;
       const c = new Character(d.cls);
       c.points = d.points; c.gold = d.gold; c.runs = d.runs ?? 0; c.wins = d.wins ?? 0; c.level = d.level ?? 1; c.xp = d.xp ?? 0;
-      c.alloc = new Set<string>([c.startId, ...(d.alloc as string[]).filter((id) => NODES[id])]);
+      c.pointsTotal = d.pointsTotal ?? d.points + (d.alloc?.length ?? 0);
+      c.totals = { ...NO_TOTALS, ...(d.totals ?? {}) }; c.done = d.done ?? {}; c.bosses = d.bosses ?? {};
+      if (d.treeV !== TREE_VERSION) { c.points = c.pointsTotal; c.alloc = new Set([c.startId]); } // nowy układ drzewka: zwrot punktów
+      else c.alloc = new Set<string>([c.startId, ...(d.alloc as string[]).filter((id) => NODES[id])]);
       Object.assign(c.skills, d.skills);
       c.supportBag = (d.supportBag as SupportId[]).filter((s) => SUPPORT_IDS.includes(s));
       c.loadout = newLoadout().map((blank, i) => ({ skill: d.loadout?.[i]?.skill ?? null, sup: blank.sup.map((_, j) => d.loadout?.[i]?.sup?.[j] ?? null) }));

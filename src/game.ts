@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
+import { BOSS_POINTS, BossDef, pickBoss, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
+import { countOf, skillBase } from './skills';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
 import { H, S, W, setupCam, spr } from './gfx';
@@ -12,7 +13,7 @@ interface Shot {
   obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; pierce: number; dmg: number; hit: Set<Enemy>; m: Mods;
   kind: 'normal' | 'boom' | 'home'; travelled: number; maxDist: number; back: boolean; spd: number;
 }
-interface Zone { obj: Phaser.GameObjects.Arc; x: number; y: number; R: number; life: number; tick: number; dmg: number; m: Mods }
+interface Zone { obj: Phaser.GameObjects.Arc; x: number; y: number; R: number; life: number; tick: number; tickEvery: number; dmg: number; m: Mods }
 interface Minion { obj: Phaser.GameObjects.Image; cd: number; hitCd: number }
 interface Drop { obj: Phaser.GameObjects.Image; beam?: Phaser.GameObjects.Image; item?: Item; skill?: SkillId; support?: SupportId }
 interface SkillState {
@@ -31,6 +32,7 @@ export class GameScene extends Phaser.Scene {
   private invuln = 0;
   time_ = 0; private kills = 0; private spawned = 0; private spawnT = 0; private nextElite = 0; private regenAcc = 0;
   private bossSpawned = false; private bossDead = false; private xpGained = 0; private startLevel = 1;
+  private bossDef: BossDef | null = null; private unlocked: string[] = [];
   private enemies: Enemy[] = []; private shots: Shot[] = []; private zones: Zone[] = []; private drops: Drop[] = [];
   private states: SkillState[] = [];
   private fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
@@ -57,7 +59,7 @@ export class GameScene extends Phaser.Scene {
     this.mode = MODES[data?.mode ?? 'quick'];
     this.hp = this.char.maxHp;
     this.invuln = 0; this.time_ = 0; this.kills = 0; this.spawned = 0; this.spawnT = 0.3; this.nextElite = this.mode.eliteEvery; this.regenAcc = 0;
-    this.bossSpawned = false; this.bossDead = false; this.xpGained = 0; this.startLevel = this.char.level;
+    this.bossSpawned = false; this.bossDead = false; this.xpGained = 0; this.startLevel = this.char.level; this.bossDef = null; this.unlocked = [];
     this.enemies = []; this.shots = []; this.zones = []; this.drops = []; this.states = []; this.icons = [];
     this.fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
     this.over = false; this.popCount = 0; this.fxCount = 0; this.found = 0; this.stickOrigin = null; this.quitArmed = false;
@@ -104,12 +106,12 @@ export class GameScene extends Phaser.Scene {
     const add = (k: StatKey, v: number) => { b[k] += v; };
     for (const s of this.states) {
       if (s.kind !== 'aura') continue;
-      const k = this.strength(s.m), lv = s.lv;
+      const k = this.strength(s.m), sb = skillBase(s.id, s.lv);
       switch (s.id) {
-        case 'a_fury': add('dmg', (0.06 + 0.03 * lv) * k); break;
-        case 'a_haste': add('cdr', (0.03 + 0.015 * lv) * k); add('speed', (0.02 + 0.01 * lv) * k); break;
-        case 'a_guard': add('armor', (1 + 0.8 * lv) * k); add('regen', (0.25 + 0.12 * lv) * k); break;
-        case 'a_sight': add('crit', (0.02 + 0.012 * lv) * k); add('area', (0.03 + 0.015 * lv) * k); break;
+        case 'a_fury': add('dmg', (sb.a / 100) * k); break;
+        case 'a_haste': add('cdr', (sb.a / 100) * k); add('speed', (sb.b / 100) * k); break;
+        case 'a_guard': add('armor', sb.a * k); add('regen', sb.b * k); break;
+        case 'a_sight': add('crit', (sb.a / 100) * k); add('area', (sb.b / 100) * k); break;
         default: break;
       }
     }
@@ -124,7 +126,7 @@ export class GameScene extends Phaser.Scene {
       const id = l.skill as SkillId, m = combineMods(l.sup), kind = SKILLS[id].kind;
       const s: SkillState = { id, kind, lv: this.char.skills[id], m, cd: kind === 'buff' ? 1.5 : 0, cdMax: 1, orbs: [], angle: 0, minions: [] };
       if (kind === 'minion') {
-        const n = 1 + Math.floor(s.lv / 2) + Math.round(this.char.stats.proj) + m.proj;
+        const n = countOf(id, skillBase(id, s.lv), Math.round(this.char.stats.proj) + m.proj, m);
         for (let i = 0; i < n; i++) s.minions.push({ obj: spr(this, 0, 0, id === 'm_eye' ? 'mn_eye' : 'mn_servant').setDepth(9), cd: 0.5 + i * 0.3, hitCd: 0 });
       }
       return s;
@@ -212,26 +214,32 @@ export class GameScene extends Phaser.Scene {
 
   private addEnemy(type: 'grunt' | 'fast' | 'tank' | 'elite' | 'boss'): void {
     const L = this.char.level, p = this.spawned / this.mode.target;
-    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * p) * this.mode.hpMul;
+    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (type === 'boss' ? 0.5 : p)) * this.mode.hpMul;
     const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul;
     const xpScale = (1 + 0.2 * (L - 1)) * this.mode.xpMul;
     let key = 'e_grunt', r = 11, hp = 12, speed = 55, dmg = 8, xp = 1, big = 1;
     if (type === 'fast') { key = 'e_fast'; r = 9; hp = 7; speed = 95; dmg = 6; xp = 1; }
     else if (type === 'tank') { key = 'e_tank'; r = 18; hp = 60; speed = 38; dmg = 16; xp = 3; }
     else if (type === 'elite') { key = 'e_elite'; r = 22; hp = 150; speed = 50; dmg = 14; xp = 12; }
-    else if (type === 'boss') { key = 'e_elite'; r = 40; hp = 1100; speed = 42; dmg = 24; xp = 90; big = 1.8; }
+    else if (type === 'boss' && this.bossDef) { key = 'e_elite'; r = 22 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 24 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
     if (type !== 'boss') this.spawned++;
     const a = Math.random() * Math.PI * 2;
     const obj = spr(this, this.player.x + Math.cos(a) * 400, this.player.y + Math.sin(a) * 400, key).setDepth(type === 'boss' ? 6 : 5);
     if (big !== 1) obj.setScale(big / S);
     const e: Enemy = { obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0, elite: type === 'elite', boss: type === 'boss', dead: false };
     this.enemies.push(e);
-    if (type === 'boss') this.toast('BOSS!', '#ff5470');
+    if (type === 'boss' && this.bossDef) this.toast(`BOSS: ${this.bossDef.name}`, '#ff5470');
   }
 
   private spawnBoss(): void {
     this.bossSpawned = true;
+    this.bossDef = pickBoss(this.char.level, this.char.bosses);
     this.addEnemy('boss');
+  }
+
+  /** osiągnięcia: punkty i powiadomienia */
+  private checkAch(): void {
+    for (const a of this.char.checkAchievements()) { this.unlocked.push(`${a.name} +${a.pts}`); this.toast(`OSIĄGNIĘCIE: ${a.name}  +${a.pts} pkt`, '#7be8a8'); }
   }
 
   private nearestTo(x: number, y: number, maxD = 1e9, skip?: Set<Enemy>): Enemy | null {
@@ -262,24 +270,24 @@ export class GameScene extends Phaser.Scene {
 
   /** zwraca true, jeśli umiejętność wystrzeliła (jest cel) */
   private fire(s: SkillState, dmgS: number, echo: boolean): boolean {
-    const { lv, m } = s, st = this.st, P = this.player;
+    const { lv, m } = s, st = this.st, P = this.player, b = skillBase(s.id, lv);
     const area = (1 + st.area) * m.area, extra = Math.round(st.proj) + m.proj, cdm = (1 - st.cdr) * m.cd;
-    const setCd = (v: number) => { if (!echo) { s.cd = Math.max(0.2, v * cdm); s.cdMax = s.cd; } };
+    const setCd = () => { if (!echo) { s.cd = Math.max(0.2, b.cd * cdm); s.cdMax = s.cd; } };
     const aimAt = (e: Enemy) => Math.atan2(e.obj.y - P.y, e.obj.x - P.x);
+    const n = countOf(s.id, b, extra, m), dmg = b.dmg * dmgS;
 
     switch (s.id) {
       case 'blade': {
         const target = this.nearestTo(P.x, P.y, 170 * area);
         if (!target) return false;
-        setCd(1.0 - 0.07 * lv);
-        const ang = aimAt(target), range = (60 + 7 * lv) * area, base = (14 + 5 * lv) * dmgS;
-        const n = 1 + Math.min(extra, 3), half = Math.PI / 2;
+        setCd();
+        const ang = aimAt(target), range = b.range * area, half = Math.PI / 2;
         for (let i = 0; i < n; i++) {
           const a = ang + (i - (n - 1) / 2) * 1.0;
           for (const e of this.enemies.slice()) {
             if (e.dead || this.dist(P, e.obj) > range + e.r) continue;
             if (Math.abs(Phaser.Math.Angle.Wrap(Math.atan2(e.obj.y - P.y, e.obj.x - P.x) - a)) > half) continue;
-            this.hurt(e, base, m);
+            this.hurt(e, dmg, m);
           }
           const arc = this.add.graphics().setDepth(9);
           arc.fillStyle(SKILLS.blade.color, 0.4).slice(P.x, P.y, range, a - half, a + half).fillPath();
@@ -290,55 +298,54 @@ export class GameScene extends Phaser.Scene {
       case 'bolt': {
         const target = this.nearestTo(P.x, P.y, 420);
         if (!target) return false;
-        setCd(1.3 - 0.1 * lv);
-        const ang = aimAt(target), count = 1 + (lv >= 3 ? 1 : 0) + (lv >= 5 ? 1 : 0) + extra;
-        for (let i = 0; i < count; i++) this.shot(P.x, P.y, 'bolt', ang + (i - (count - 1) / 2) * 0.14, 320, 1.4, 1 + (lv >= 4 ? 1 : 0) + m.pierce, (10 + 3 * lv) * dmgS, m);
+        setCd();
+        const ang = aimAt(target);
+        for (let i = 0; i < n; i++) this.shot(P.x, P.y, 'bolt', ang + (i - (n - 1) / 2) * 0.14, 320, 1.4, b.pierce + m.pierce, dmg, m);
         return true;
       }
       case 'lance': {
         const target = this.nearestTo(P.x, P.y, 460);
         if (!target) return false;
-        setCd(2.0);
-        const ang = aimAt(target), count = 1 + (lv >= 3 ? 1 : 0) + (lv >= 5 ? 1 : 0) + extra;
-        for (let i = 0; i < count; i++) this.shot(P.x, P.y, 'lance', ang + (i - (count - 1) / 2) * 0.12, 540, 0.95, 6 + m.pierce, (22 + 8 * lv) * dmgS, m);
+        setCd();
+        const ang = aimAt(target);
+        for (let i = 0; i < n; i++) this.shot(P.x, P.y, 'lance', ang + (i - (n - 1) / 2) * 0.12, 540, 0.95, b.pierce + m.pierce, dmg, m);
         return true;
       }
       case 'scythe': {
         const target = this.nearestTo(P.x, P.y, 320);
         if (!target) return false;
-        setCd(3.0);
-        const ang = aimAt(target), count = 1 + extra;
-        for (let i = 0; i < count; i++) this.shot(P.x, P.y, 'scythe', ang + (i - (count - 1) / 2) * 0.6, 300, 6, 999, (16 + 6 * lv) * dmgS, m, 'boom', 210 * area);
+        setCd();
+        const ang = aimAt(target);
+        for (let i = 0; i < n; i++) this.shot(P.x, P.y, 'scythe', ang + (i - (n - 1) / 2) * 0.6, 300, 6, 999, dmg, m, 'boom', b.range * area);
         return true;
       }
       case 'swarm': {
         if (!this.nearestTo(P.x, P.y, 420)) return false;
-        setCd(3.2);
-        const n = 3 + lv + extra;
-        for (let i = 0; i < n; i++) this.shot(P.x, P.y, 'wisp', Math.random() * Math.PI * 2, 240, 2.6, 1 + m.pierce, (6 + 2.5 * lv) * dmgS, m, 'home');
+        setCd();
+        for (let i = 0; i < n; i++) this.shot(P.x, P.y, 'wisp', Math.random() * Math.PI * 2, 240, 2.6, b.pierce + m.pierce, dmg, m, 'home');
         return true;
       }
       case 'rift': {
         const pool = this.enemies.filter((e) => !e.dead && this.dist(P, e.obj) < 340);
         if (!pool.length) return false;
-        setCd(5.0);
-        const R = 55 * area;
-        for (let i = 0; i < 1 + extra; i++) {
+        setCd();
+        const R = b.range * area;
+        for (let i = 0; i < n; i++) {
           const e = Phaser.Utils.Array.GetRandom(pool);
           const obj = this.add.circle(e.obj.x, e.obj.y, R, SKILLS.rift.color, 0.2).setStrokeStyle(3, SKILLS.rift.color, 0.9).setDepth(2);
           this.tweens.add({ targets: obj, scale: 1.08, yoyo: true, repeat: -1, duration: 400 });
-          this.zones.push({ obj, x: e.obj.x, y: e.obj.y, R, life: 3.5, tick: 0.1, dmg: (8 + 3 * lv) * dmgS, m });
+          this.zones.push({ obj, x: e.obj.x, y: e.obj.y, R, life: b.dur, tick: 0.1, tickEvery: b.a, dmg, m });
         }
         return true;
       }
       case 'nova': {
         if (!this.nearestTo(P.x, P.y, 200 * area)) return false;
-        setCd(3.6);
-        const R = (90 + 10 * lv) * area;
+        setCd();
+        const R = b.range * area;
         for (const e of this.enemies.slice()) {
           if (e.dead || this.dist(P, e.obj) > R + e.r) continue;
-          this.hurt(e, (18 + 6 * lv) * dmgS, m);
-          e.slowT = Math.max(e.slowT, 2.5 + m.slow);
+          this.hurt(e, dmg, m);
+          e.slowT = Math.max(e.slowT, b.dur + m.slow);
         }
         const ring = this.add.circle(P.x, P.y, R, SKILLS.nova.color, 0.18).setStrokeStyle(3, SKILLS.nova.color).setDepth(9).setScale(0.1);
         this.tweens.add({ targets: ring, scale: 1, alpha: 0, duration: 350, onComplete: () => ring.destroy() });
@@ -347,15 +354,14 @@ export class GameScene extends Phaser.Scene {
       case 'chain': {
         const first = this.nearestTo(P.x, P.y, 280);
         if (!first) return false;
-        setCd(1.6);
+        setCd();
         const hit = new Set<Enemy>(), g = this.add.graphics().setDepth(11);
         g.lineStyle(3, SKILLS.chain.color);
         let cur: Enemy | null = first, px = P.x, py = P.y;
-        const jumps = 3 + lv + extra + m.pierce;
-        for (let i = 0; i < jumps && cur; i++) {
+        for (let i = 0; i < n && cur; i++) {
           g.lineBetween(px, py, cur.obj.x, cur.obj.y);
           hit.add(cur); px = cur.obj.x; py = cur.obj.y;
-          this.hurt(cur, (16 + 5 * lv) * dmgS, m);
+          this.hurt(cur, dmg, m);
           cur = this.nearestTo(px, py, 150, hit);
         }
         this.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: () => g.destroy() });
@@ -364,37 +370,37 @@ export class GameScene extends Phaser.Scene {
       case 'meteor': {
         const pool = this.enemies.filter((e) => !e.dead && this.dist(P, e.obj) < 340);
         if (!pool.length) return false;
-        setCd(4);
-        const R = 70 * area;
-        for (let i = 0; i < 1 + extra; i++) {
+        setCd();
+        const R = b.range * area;
+        for (let i = 0; i < n; i++) {
           const e = Phaser.Utils.Array.GetRandom(pool), x = e.obj.x, y = e.obj.y;
           const mark = this.add.circle(x, y, R, SKILLS.meteor.color, 0.15).setStrokeStyle(2, SKILLS.meteor.color).setDepth(2);
-          this.time.delayedCall(700, () => { mark.destroy(); this.blast(x, y, R, (40 + 14 * lv) * dmgS, m, SKILLS.meteor.color); });
+          this.time.delayedCall(700, () => { mark.destroy(); this.blast(x, y, R, dmg, m, SKILLS.meteor.color); });
         }
         return true;
       }
       case 'spikes': {
         const pool = this.enemies.filter((e) => !e.dead && this.dist(P, e.obj) < 260);
         if (!pool.length) return false;
-        setCd(2.4);
-        const R = 34 * area, n = Math.min(pool.length, 3 + Math.floor(lv / 2) + extra * 2);
+        setCd();
+        const R = b.range * area;
         Phaser.Utils.Array.Shuffle(pool).slice(0, n).forEach((e) => {
           const x = e.obj.x, y = e.obj.y;
           const mark = this.add.circle(x, y, R, SKILLS.spikes.color, 0.12).setStrokeStyle(2, SKILLS.spikes.color).setDepth(2);
-          this.time.delayedCall(450, () => { mark.destroy(); this.blast(x, y, R, (20 + 7 * lv) * dmgS, m, SKILLS.spikes.color); });
+          this.time.delayedCall(450, () => { mark.destroy(); this.blast(x, y, R, dmg, m, SKILLS.spikes.color); });
         });
         return true;
       }
       case 'tentacles': {
-        const pool = this.enemies.filter((e) => !e.dead && this.dist(P, e.obj) < 230 * area);
+        const pool = this.enemies.filter((e) => !e.dead && this.dist(P, e.obj) < b.range * area);
         if (!pool.length) return false;
-        setCd(2.2);
-        const n = Math.min(pool.length, 2 + Math.floor(lv / 2) + extra), g = this.add.graphics().setDepth(11);
+        setCd();
+        const g = this.add.graphics().setDepth(11);
         g.lineStyle(4, SKILLS.tentacles.color, 0.9);
         Phaser.Utils.Array.Shuffle(pool).slice(0, n).forEach((e) => {
           const ex = e.obj.x, ey = e.obj.y, mx = (P.x + ex) / 2 + (Math.random() - 0.5) * 60, my = (P.y + ey) / 2 + (Math.random() - 0.5) * 60;
           g.strokePoints(new Phaser.Curves.QuadraticBezier(new Phaser.Math.Vector2(P.x, P.y), new Phaser.Math.Vector2(mx, my), new Phaser.Math.Vector2(ex, ey)).getPoints(14));
-          this.hurt(e, (15 + 5 * lv) * dmgS, m);
+          this.hurt(e, dmg, m);
           if (!e.dead && !e.boss) {
             const a = Math.atan2(P.y - e.obj.y, P.x - e.obj.x);
             e.obj.x += Math.cos(a) * 28; e.obj.y += Math.sin(a) * 28;
@@ -414,17 +420,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private orbs(s: SkillState, dt: number): void {
-    const { lv, m } = s, st = this.st;
-    const area = (1 + st.area) * m.area, want = 1 + Math.floor(lv / 2) + Math.round(st.proj) + m.proj;
+  const { lv, m } = s, st = this.st, b = skillBase('orbs', lv);
+    const area = (1 + st.area) * m.area, want = countOf('orbs', b, Math.round(st.proj) + m.proj, m);
     while (s.orbs.length < want) s.orbs.push(spr(this, 0, 0, 'orb').setDepth(9));
-    s.angle += (dt * (2.6 + 0.15 * lv)) / Math.max(0.5, (1 - st.cdr) * m.cd);
-    const R = 65 * area;
+    s.angle += (dt * b.a) / Math.max(0.5, (1 - st.cdr) * m.cd);
+    const R = b.range * area;
     s.orbs.forEach((o, i) => {
       const a = s.angle + (i / s.orbs.length) * Math.PI * 2;
       o.setPosition(this.player.x + Math.cos(a) * R, this.player.y + Math.sin(a) * R).setRotation(a);
       for (const e of this.enemies.slice()) {
         if (e.dead || e.hitT > 0) continue;
-        if (this.dist(o, e.obj) < e.r + 10) this.hurt(e, 8 + 3 * lv, m);
+        if (this.dist(o, e.obj) < e.r + 10) this.hurt(e, b.dmg, m);
       }
     });
   }
@@ -433,24 +439,24 @@ export class GameScene extends Phaser.Scene {
   private castBuff(s: SkillState, dt: number): void {
     s.cd -= dt;
     if (s.cd > 0) return;
-    const { lv, m } = s, k = this.strength(m), P = this.player, cdm = (1 - this.st.cdr) * m.cd;
+    const { lv, m } = s, k = this.strength(m), P = this.player, cdm = (1 - this.st.cdr) * m.cd, b = skillBase(s.id, lv);
     if (!this.nearestTo(P.x, P.y, 300)) return;
     const f = this.fx;
     const ring = (color: number, R: number) => {
       const r = this.add.circle(P.x, P.y, R, color, 0.2).setStrokeStyle(3, color).setDepth(9);
       this.tweens.add({ targets: r, alpha: 0, scale: 1.4, duration: 450, onComplete: () => r.destroy() });
     };
+    s.cd = Math.max(0.5, b.cd * cdm);
     switch (s.id) {
       case 'heal': {
-        s.cd = 6 * cdm;
-        this.heal(Math.round(this.char.maxHp * (0.04 + 0.02 * lv) * k));
-        const R = 80 * (1 + this.st.area) * m.area;
-        for (const e of this.enemies.slice()) if (!e.dead && this.dist(P, e.obj) < R + e.r) this.hurt(e, 10 + 5 * lv, m);
+        this.heal(Math.round(this.char.maxHp * (b.a / 100) * k));
+        const R = b.range * (1 + this.st.area) * m.area;
+        for (const e of this.enemies.slice()) if (!e.dead && this.dist(P, e.obj) < R + e.r) this.hurt(e, b.dmg, m);
         ring(SKILLS.heal.color, R); break;
       }
-      case 'frenzy': s.cd = 11 * cdm; f.frenzyT = 4 + 0.4 * lv; f.frenzyDmg = (0.25 + 0.07 * lv) * k; f.frenzySpd = (0.15 + 0.03 * lv) * k; ring(SKILLS.frenzy.color, 50); this.refreshStats(); break;
-      case 'haste': s.cd = 12 * cdm; f.hasteT = 3.5 + 0.3 * lv; f.hasteCdr = (0.25 + 0.04 * lv) * k; ring(SKILLS.haste.color, 50); this.refreshStats(); break;
-      case 'ward': s.cd = 12 * cdm; f.shield = this.char.maxHp * (0.12 + 0.05 * lv) * k; f.shieldT = 6; ring(SKILLS.ward.color, 50); break;
+      case 'frenzy': f.frenzyT = b.dur; f.frenzyDmg = (b.a / 100) * k; f.frenzySpd = (b.b / 100) * k; ring(SKILLS.frenzy.color, 50); this.refreshStats(); break;
+      case 'haste': f.hasteT = b.dur; f.hasteCdr = (b.a / 100) * k; ring(SKILLS.haste.color, 50); this.refreshStats(); break;
+      case 'ward': f.shield = this.char.maxHp * (b.a / 100) * k; f.shieldT = b.dur; ring(SKILLS.ward.color, 50); break;
       default: break;
     }
     s.cdMax = Math.max(1, s.cd);
@@ -458,7 +464,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- słudzy ----------
   private minions(s: SkillState, dt: number): void {
-    const { lv, m } = s, P = this.player, cdm = (1 - this.st.cdr) * m.cd, n = s.minions.length;
+    const { lv, m } = s, P = this.player, cdm = (1 - this.st.cdr) * m.cd, n = s.minions.length, b = skillBase(s.id, lv);
     s.angle += dt * 1.4;
     s.minions.forEach((mn, i) => {
       const o = mn.obj;
@@ -470,7 +476,7 @@ export class GameScene extends Phaser.Scene {
         mn.cd -= dt;
         if (mn.cd <= 0) {
           const t = this.nearestTo(o.x, o.y, 300);
-          if (t) { mn.cd = 1.1 * cdm; this.shot(o.x, o.y, 'wisp', Math.atan2(t.obj.y - o.y, t.obj.x - o.x), 300, 1.2, 1 + m.pierce, (7 + 3 * lv), m); }
+          if (t) { mn.cd = b.cd * cdm; this.shot(o.x, o.y, 'wisp', Math.atan2(t.obj.y - o.y, t.obj.x - o.x), 300, 1.2, 1 + m.pierce, b.dmg, m); }
           else mn.cd = 0.3;
         }
       } else {
@@ -479,7 +485,7 @@ export class GameScene extends Phaser.Scene {
         if (t) { tx = t.obj.x; ty = t.obj.y; sp = 150 + 8 * lv; }
         const a = Math.atan2(ty - o.y, tx - o.x), d = Phaser.Math.Distance.Between(o.x, o.y, tx, ty);
         if (d > 6) { o.x += Math.cos(a) * sp * dt; o.y += Math.sin(a) * sp * dt; }
-        if (t && mn.hitCd <= 0 && d < t.r + 14) { mn.hitCd = 0.5 * cdm; this.hurt(t, 9 + 4 * lv, m); }
+        if (t && mn.hitCd <= 0 && d < t.r + 14) { mn.hitCd = b.cd * cdm; this.hurt(t, b.dmg, m); }
       }
       o.setScale((1 + Math.sin(this.time_ * 6 + i) * 0.04) / S);
     });
@@ -524,7 +530,7 @@ export class GameScene extends Phaser.Scene {
     this.zones = this.zones.filter((z) => {
       z.life -= dt; z.tick -= dt;
       if (z.tick <= 0) {
-        z.tick = 0.35;
+        z.tick = z.tickEvery;
         for (const e of this.enemies.slice()) if (!e.dead && Phaser.Math.Distance.Between(z.x, z.y, e.obj.x, e.obj.y) < z.R + e.r) this.hurt(e, z.dmg, z.m);
       }
       if (z.life <= 0) { z.obj.destroy(); return false; }
@@ -557,8 +563,14 @@ export class GameScene extends Phaser.Scene {
     this.kills++;
     this.xpFly(e.obj.x, e.obj.y);
     this.xpGained += e.xp;
+    this.char.totals.kills++;
     const lv = this.char.gainXp(e.xp);
-    if (lv > 0) { this.toast(`POZIOM ${this.char.level}!  +${lv} pkt drzewka`, '#ffd86b'); this.char.save(); }
+    if (lv > 0) { this.toast(`POZIOM ${this.char.level}!  +${lv} pkt drzewka`, '#ffd86b'); this.char.save(); this.checkAch(); }
+    else if (this.kills % 25 === 0) this.checkAch();
+    if (e.boss && this.bossDef) {
+      if (this.char.markBoss(this.bossDef.id)) this.toast(`Pierwsze pokonanie: ${this.bossDef.name}!  +${BOSS_POINTS} pkt`, '#ffd86b');
+      this.checkAch(); this.char.save();
+    }
     this.rollDrop(e);
     if (e.boss) this.bossDead = true;
     e.obj.destroy();
@@ -610,6 +622,8 @@ export class GameScene extends Phaser.Scene {
     this.drops = this.drops.filter((d) => {
       if (this.dist(this.player, d.obj) > 22) return true;
       this.found++;
+      if (d.skill || d.support) this.char.totals.gems++;
+      if (d.item && d.item.rarity === 3) this.char.totals.legendary++;
       if (d.skill) {
         const r = this.char.addSkillGem(d.skill);
         this.toast(r === 'new' ? `NOWY GEM: ${SKILLS[d.skill].name}!` : r === 'up' ? `${SKILLS[d.skill].name}: wyższy poziom!` : `${SKILLS[d.skill].name}: maks. (+20 zł)`, '#d18bff');
@@ -623,6 +637,7 @@ export class GameScene extends Phaser.Scene {
         this.refreshStats();
         this.toast(`${d.item.name}${r === 'equipped' ? ' (założony)' : r === 'bag' ? ' (w plecaku)' : ' (sprzedany)'}`, '#' + RARITY_COLOR[d.item.rarity].toString(16).padStart(6, '0'));
       }
+      this.checkAch();
       d.obj.destroy(); d.beam?.destroy();
       return false;
     });
@@ -645,7 +660,7 @@ export class GameScene extends Phaser.Scene {
       if (e.hitT > 0.28) e.obj.setTintFill(0xffffff);
       else if (e.frozenT > 0 || e.slowT > 0) e.obj.setTint(0x8fc4ff);
       else if (e.burnT > 0) e.obj.setTint(0xffa060);
-      else if (e.boss) e.obj.setTint(0xff7070);
+      else if (e.boss && this.bossDef) e.obj.setTint(this.bossDef.tint);
       else e.obj.clearTint();
       const sf = e.frozenT > 0 ? 0 : e.slowT > 0 ? 0.5 : 1;
       const a = Math.atan2(this.player.y - e.obj.y, this.player.x - e.obj.x);
@@ -676,7 +691,8 @@ export class GameScene extends Phaser.Scene {
     this.over = true; this.stick.clear();
     const c = this.char, md = this.mode;
     const gold = Math.floor((this.kills * 0.8 + this.time_ / 10) * (1 + this.st.gold) * md.goldMul * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
-    c.gold += gold; c.runs++; if (win) c.wins++;
+    c.gold += gold; c.runs++; c.totals.runs++; if (win) { c.wins++; c.totals.wins++; if (md.boss) c.totals.longWins++; }
+    this.checkAch();
     c.save();
     const w = W;
     const dim = this.add.rectangle(0, 0, w, H, 0x000000, 0.8).setOrigin(0).setScrollFactor(0).setDepth(200).setInteractive();
@@ -684,8 +700,8 @@ export class GameScene extends Phaser.Scene {
     const gained = c.level - this.startLevel;
     this.add.text(w / 2, 200, win ? 'ZWYCIĘSTWO' : 'KONIEC WYPRAWY', { fontSize: '32px', color: win ? '#4ade80' : '#c9a4ff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     this.add.text(w / 2, 232, md.name, { fontSize: '13px', color: '#a8b0d0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
-    this.add.text(w / 2, 335, `Pokonani: ${this.kills} / ${md.target}\nCzas: ${m}:${s}\nZnalezione: ${this.found}\n\n+${Math.round(this.xpGained)} XP${gained > 0 ? `  (poziom ${c.level}, +${gained} pkt drzewka)` : ''}\n+${gold} złota`, { fontSize: '17px', color: '#fff', align: 'center', lineSpacing: 5 }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
-    this.add.text(w / 2, 480, 'Dotknij, aby wrócić', { fontSize: '14px', color: '#8892b0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+    this.add.text(w / 2, 335, `Pokonani: ${this.kills} / ${md.target}\nCzas: ${m}:${s}\nZnalezione: ${this.found}\n\n+${Math.round(this.xpGained)} XP${gained > 0 ? `  (poziom ${c.level}, +${gained} pkt drzewka)` : ''}\n+${gold} złota${this.unlocked.length ? '\nOsiągnięcia: ' + this.unlocked.join(', ') : ''}`, { fontSize: '17px', color: '#fff', align: 'center', lineSpacing: 5, wordWrap: { width: 330 } }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+    this.add.text(w / 2, 520, 'Dotknij, aby wrócić', { fontSize: '14px', color: '#8892b0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     dim.on('pointerdown', () => this.scene.start('menu'));
   }
 

@@ -139,3 +139,39 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   bone: { name: 'Kościany Kapłan', tagline: 'Opiekun Pochowanych', desc: 'Pancerz z kości i kolce z ziemi. Trudny do zabicia.', color: 0xe8dcc0, skill: 'spikes', stats: { armor: 2, dmg: 0.06, regen: 0.3 }, region: 'Kości' },
 };
 export const CLASS_IDS: ClassId[] = ['blood', 'star', 'void', 'deep', 'dream', 'bone'];
+
+// ---------- bossowie i osiągnięcia (jednorazowe punkty drzewka) ----------
+export interface BossDef { id: string; name: string; minLevel: number; hpMul: number; dmgMul: number; scale: number; tint: number }
+export const BOSSES: BossDef[] = [
+  { id: 'guard', name: 'Strażnik Progu', minLevel: 1, hpMul: 1, dmgMul: 1, scale: 1.7, tint: 0xff7070 },
+  { id: 'devourer', name: 'Pożeracz Gwiazd', minLevel: 10, hpMul: 1.5, dmgMul: 1.2, scale: 1.9, tint: 0xffd36b },
+  { id: 'mother', name: 'Matka Otchłani', minLevel: 20, hpMul: 2.2, dmgMul: 1.4, scale: 2.1, tint: 0xc77dff },
+  { id: 'nameless', name: 'Bezimienny', minLevel: 30, hpMul: 3.2, dmgMul: 1.7, scale: 2.3, tint: 0x6ee7ff },
+];
+export const BOSS_POINTS = 3;
+/** pierwszy jeszcze niepokonany boss dostępny na tym poziomie, a gdy wszystkie pokonane: najwyższy dostępny */
+export function pickBoss(level: number, killed: Record<string, boolean>): BossDef {
+  const ok = BOSSES.filter((b) => b.minLevel <= level);
+  return ok.find((b) => !killed[b.id]) ?? ok[ok.length - 1];
+}
+
+export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number }
+export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0 };
+export interface Achievement { id: string; name: string; desc: string; pts: number; goal: number; value: (t: Totals, level: number) => number }
+export const ACHIEVEMENTS: Achievement[] = [
+  { id: 'kill100', name: 'Pierwsza krew', desc: 'Pokonaj 100 wrogów', pts: 1, goal: 100, value: (t) => t.kills },
+  { id: 'kill1000', name: 'Żniwiarz', desc: 'Pokonaj 1000 wrogów', pts: 2, goal: 1000, value: (t) => t.kills },
+  { id: 'kill5000', name: 'Plaga', desc: 'Pokonaj 5000 wrogów', pts: 3, goal: 5000, value: (t) => t.kills },
+  { id: 'win1', name: 'Pierwsze zwycięstwo', desc: 'Wygraj wyprawę', pts: 1, goal: 1, value: (t) => t.wins },
+  { id: 'win10', name: 'Weteran', desc: 'Wygraj 10 wypraw', pts: 2, goal: 10, value: (t) => t.wins },
+  { id: 'win40', name: 'Niezłomny', desc: 'Wygraj 40 wypraw', pts: 3, goal: 40, value: (t) => t.wins },
+  { id: 'long1', name: 'Zdobywca Otchłani', desc: 'Wygraj wielką wyprawę', pts: 3, goal: 1, value: (t) => t.longWins },
+  { id: 'long5', name: 'Pogromca', desc: 'Wygraj 5 wielkich wypraw', pts: 3, goal: 5, value: (t) => t.longWins },
+  { id: 'lvl10', name: 'Adept', desc: 'Osiągnij poziom 10', pts: 1, goal: 10, value: (_t, l) => l },
+  { id: 'lvl20', name: 'Mistrz', desc: 'Osiągnij poziom 20', pts: 2, goal: 20, value: (_t, l) => l },
+  { id: 'lvl30', name: 'Arcymistrz', desc: 'Osiągnij poziom 30', pts: 3, goal: 30, value: (_t, l) => l },
+  { id: 'gems10', name: 'Kolekcjoner', desc: 'Znajdź 10 gemów', pts: 1, goal: 10, value: (t) => t.gems },
+  { id: 'gems50', name: 'Skarbiec', desc: 'Znajdź 50 gemów', pts: 2, goal: 50, value: (t) => t.gems },
+  { id: 'legend', name: 'Legenda', desc: 'Znajdź legendarny przedmiot', pts: 2, goal: 1, value: (t) => t.legendary },
+  { id: 'maxgem', name: 'Wyszkolony', desc: 'Rozwiń gem do maks. poziomu', pts: 2, goal: 1, value: (t) => t.maxSkill },
+];
