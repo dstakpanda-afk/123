@@ -6,6 +6,9 @@ Eldritch-fantasy ARPG na Androida (Phaser 3 + TypeScript + Vite + Capacitor). St
 - `npm run docs` – build do `docs/` (GitHub Pages)
 - `npm run android` – build + synchronizacja z projektem Androida (`npx cap open android`)
 
+## Grafika
+- Gra renderuje się w podwójnej rozdzielczości (`S = 2` w `src/gfx.ts`), a wszystkie sprite'y i ikony generuje kod (`makeTextures`), bez plików graficznych.
+
 ## Zasady
 - **6 klas** (Kultysta Krwi, Wyznawca Gwiazd, Łowca Pustki, Strażnik Głębin, Śniący, Kościany Kapłan) startują w różnych miejscach **jednego wielkiego drzewka** (~500 węzłów, 12 kamieni węgielnych). Do cudzych obszarów dochodzi się za punkty.
 - **Wyprawa** trwa 6 minut. Poziom w trakcie wyprawy nic nie daje, ale po jej zakończeniu zamienia się w punkty drzewka.

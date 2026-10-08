@@ -24,6 +24,18 @@ export function fmtStats(s: Partial<Stats>): string[] {
   return (Object.keys(s) as StatKey[]).filter((k) => s[k]).map((k) => fmtStat(k, s[k] as number));
 }
 
+const SHORT: Record<StatKey, string> = {
+  dmg: 'obrażenia', cdr: 'odnowienie', hp: 'życie', regen: 'regen./s', speed: 'szybkość', crit: 'krytyk', critDmg: 'obr. kryt.',
+  area: 'obszar', proj: 'pociski', steal: 'kradz. życia', armor: 'pancerz', xp: 'XP', magnet: 'zbieranie', gold: 'złoto', drop: 'łup',
+};
+/** krótki zapis bonusów, np. „+10% obrażenia · +20 życie” */
+export function fmtShort(s: Partial<Stats>): string {
+  return (Object.keys(s) as StatKey[]).filter((k) => s[k]).map((k) => {
+    const v = s[k] as number, sign = v < 0 ? '' : '+';
+    return PCT.includes(k) ? `${sign}${Math.round(v * 100)}% ${SHORT[k]}` : `${sign}${Math.round(v * 10) / 10} ${SHORT[k]}`;
+  }).join(' · ');
+}
+
 // ---------- umiejętności aktywne (gemy) ----------
 export type SkillId = 'blade' | 'orbs' | 'bolt' | 'nova' | 'chain' | 'meteor' | 'heal' | 'tentacles' | 'spikes';
 export const MAX_SKILL = 5;

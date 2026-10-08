@@ -1,23 +1,24 @@
 import Phaser from 'phaser';
-import { CLASSES, Mods, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SupportId, combineMods } from './data';
+import { Mods, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SupportId, combineMods } from './data';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
+import { H, S, W, setupCam, spr } from './gfx';
 
 interface Enemy {
-  obj: Phaser.GameObjects.Arc; hp: number; speed: number; dmg: number; r: number; xp: number;
+  obj: Phaser.GameObjects.Image; hp: number; maxHp: number; speed: number; dmg: number; r: number; xp: number;
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; dead: boolean;
 }
-interface Gem { obj: Phaser.GameObjects.Arc; v: number }
-interface Shot { obj: Phaser.GameObjects.Arc; vx: number; vy: number; life: number; pierce: number; dmg: number; hit: Set<Enemy>; m: Mods }
-interface Drop { obj: Phaser.GameObjects.Shape; item?: Item; skill?: SkillId; support?: SupportId }
-interface SkillState { id: SkillId; lv: number; m: Mods; cd: number; orbs: Phaser.GameObjects.Arc[]; angle: number }
+interface Gem { obj: Phaser.GameObjects.Image; v: number }
+interface Shot { obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; pierce: number; dmg: number; hit: Set<Enemy>; m: Mods }
+interface Drop { obj: Phaser.GameObjects.Image; beam?: Phaser.GameObjects.Image; item?: Item; skill?: SkillId; support?: SupportId }
+interface SkillState { id: SkillId; lv: number; m: Mods; cd: number; cdMax: number; orbs: Phaser.GameObjects.Image[]; angle: number }
 
 const WIN_TIME = 360;
 const ENEMY_CAP = 160;
 
 export class GameScene extends Phaser.Scene {
   private char!: Character;
-  private player!: Phaser.GameObjects.Arc;
+  private player!: Phaser.GameObjects.Image;
   private hp = 100;
   private invuln = 0;
   private level = 1; private xp = 0;
@@ -29,10 +30,15 @@ export class GameScene extends Phaser.Scene {
   private stick!: Phaser.GameObjects.Graphics;
   private stickOrigin: Phaser.Math.Vector2 | null = null;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
-  private hud!: Phaser.GameObjects.Text;
+  private hudTxt!: Phaser.GameObjects.Text;
+  private hpTxt!: Phaser.GameObjects.Text;
+  private timeTxt!: Phaser.GameObjects.Text;
   private bars!: Phaser.GameObjects.Graphics;
+  private ebars!: Phaser.GameObjects.Graphics;
+  private warn!: Phaser.GameObjects.Rectangle;
   private quitTxt!: Phaser.GameObjects.Text;
   private quitArmed = false;
+  private icons: Phaser.GameObjects.Image[] = [];
 
   constructor() { super('game'); }
 
@@ -46,19 +52,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    const { width: w, height: h } = this.scale;
-    const g = this.add.graphics();
-    g.lineStyle(1, 0x1d1633).strokeRect(0, 0, 64, 64).generateTexture('grid', 64, 64); g.destroy();
+    setupCam(this);
     this.cameras.main.setBackgroundColor(0x0a0814);
-    this.bg = this.add.tileSprite(0, 0, w, h, 'grid').setOrigin(0).setScrollFactor(0);
-    this.player = this.add.circle(0, 0, 12, CLASSES[this.char.cls].color).setStrokeStyle(2, 0xffffff).setDepth(10);
-    this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
+    this.bg = this.add.tileSprite(0, 0, W, H, 'ground').setOrigin(0).setScrollFactor(0);
+    this.player = spr(this, 0, 0, `pl_${this.char.cls}`).setDepth(10);
+    this.cameras.main.setScroll(-W / 2, -H / 2);
 
+    this.ebars = this.add.graphics().setDepth(40);
+    this.warn = this.add.rectangle(0, 0, W, H, 0xff0000, 0).setOrigin(0).setScrollFactor(0).setDepth(90);
     this.bars = this.add.graphics().setScrollFactor(0).setDepth(100);
-    this.hud = this.add.text(8, 22, '', { fontSize: '12px', color: '#fff' }).setScrollFactor(0).setDepth(100);
+    const ts = { fontSize: '13px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 };
+    this.hpTxt = this.add.text(78, 21, '', { ...ts, fontSize: '12px' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
+    this.timeTxt = this.add.text(W / 2, 14, '', { ...ts, fontSize: '18px' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
+    this.hudTxt = this.add.text(8, 44, '', { ...ts, fontSize: '12px' }).setScrollFactor(0).setDepth(101);
     this.stick = this.add.graphics().setScrollFactor(0).setDepth(100);
-    const qb = this.add.rectangle(318, 40, 80, 24, 0x3a2226).setStrokeStyle(2, 0x9b4d57).setScrollFactor(0).setDepth(100).setInteractive();
-    this.quitTxt = this.add.text(318, 40, 'ZAKOŃCZ', { fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
+    const qb = this.add.rectangle(318, 28, 80, 28, 0x3a2226).setStrokeStyle(2, 0xc0626f).setScrollFactor(0).setDepth(100).setInteractive();
+    this.quitTxt = this.add.text(318, 28, 'ZAKOŃCZ', { fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
     qb.on('pointerdown', () => {
       if (this.over) return;
       if (this.quitArmed) return this.end(false);
@@ -67,15 +76,16 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT') as Record<string, Phaser.Input.Keyboard.Key>;
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer, over: unknown[]) => { if (!this.over && over.length === 0) this.stickOrigin = new Phaser.Math.Vector2(p.x, p.y); });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer, over: unknown[]) => { if (!this.over && over.length === 0) this.stickOrigin = new Phaser.Math.Vector2(p.x / S, p.y / S); });
     this.input.on('pointerup', () => { this.stickOrigin = null; });
     this.buildStates();
+    this.icons = this.states.map((st, i) => spr(this, W / 2 + (i - (this.states.length - 1) / 2) * 50, H - 30, `ic_${st.id}`).setScale(40 / 44 / S).setScrollFactor(0).setDepth(100));
     Object.assign(window, { __game: this, __mk: makeItem }); // do testów
   }
 
   private buildStates(): void {
     this.states = this.char.loadout.filter((l) => l.skill).map((l) => ({
-      id: l.skill as SkillId, lv: this.char.skills[l.skill as SkillId], m: combineMods(l.sup), cd: 0, orbs: [], angle: 0,
+      id: l.skill as SkillId, lv: this.char.skills[l.skill as SkillId], m: combineMods(l.sup), cd: 0, cdMax: 1, orbs: [], angle: 0,
     }));
   }
 
@@ -96,8 +106,11 @@ export class GameScene extends Phaser.Scene {
     this.updateGems(dt);
     this.updateDrops();
 
-    this.bg.tilePositionX = this.cameras.main.scrollX;
-    this.bg.tilePositionY = this.cameras.main.scrollY;
+    const cam = this.cameras.main, k = Math.min(1, 9 * dt);
+    cam.scrollX += (this.player.x - W / 2 - cam.scrollX) * k;
+    cam.scrollY += (this.player.y - H / 2 - cam.scrollY) * k;
+    this.bg.tilePositionX = cam.scrollX;
+    this.bg.tilePositionY = cam.scrollY;
     if (this.hp <= 0) this.end(false);
     else if (this.time_ >= WIN_TIME) this.end(true);
   }
@@ -114,11 +127,12 @@ export class GameScene extends Phaser.Scene {
     this.stick.clear();
     const p = this.input.activePointer;
     if (this.stickOrigin && p.isDown) {
-      const v = new Phaser.Math.Vector2(p.x - this.stickOrigin.x, p.y - this.stickOrigin.y);
+      const v = new Phaser.Math.Vector2(p.x / S - this.stickOrigin.x, p.y / S - this.stickOrigin.y);
       const len = Math.min(v.length(), 50);
       if (len > 6) { v.setLength(len); dx = v.x / 50; dy = v.y / 50; }
-      this.stick.lineStyle(2, 0xffffff, 0.3).strokeCircle(this.stickOrigin.x, this.stickOrigin.y, 50);
-      this.stick.fillStyle(0xffffff, 0.35).fillCircle(this.stickOrigin.x + v.x, this.stickOrigin.y + v.y, 18);
+      this.stick.lineStyle(3, 0xffffff, 0.35).strokeCircle(this.stickOrigin.x, this.stickOrigin.y, 50);
+      this.stick.fillStyle(0xffffff, 0.12).fillCircle(this.stickOrigin.x, this.stickOrigin.y, 50);
+      this.stick.fillStyle(0xffffff, 0.5).fillCircle(this.stickOrigin.x + v.x, this.stickOrigin.y + v.y, 20);
     }
     const v = new Phaser.Math.Vector2(dx, dy);
     if (v.length() > 1) v.normalize();
@@ -137,14 +151,13 @@ export class GameScene extends Phaser.Scene {
 
   private addEnemy(elite: boolean): void {
     const t = this.time_, roll = Math.random(), scale = 1 + (t / 60) * 0.4;
-    let r = 10, hp = 12, speed = 55, dmg = 8, color = 0xb03a5b, xp = 1;
-    if (elite) { r = 22; hp = 150; speed = 50; dmg = 14; color = 0xff9f1a; xp = 12; }
-    else if (t > 40 && roll < 0.25) { r = 8; hp = 7; speed = 95; dmg = 6; color = 0x3fb8a0; }
-    else if (t > 90 && roll < 0.4) { r = 18; hp = 60; speed = 38; dmg = 16; color = 0x6b4aa0; xp = 4; }
+    let key = 'e_grunt', r = 11, hp = 12, speed = 55, dmg = 8, xp = 1;
+    if (elite) { key = 'e_elite'; r = 22; hp = 150; speed = 50; dmg = 14; xp = 12; }
+    else if (t > 40 && roll < 0.25) { key = 'e_fast'; r = 9; hp = 7; speed = 95; dmg = 6; }
+    else if (t > 90 && roll < 0.4) { key = 'e_tank'; r = 18; hp = 60; speed = 38; dmg = 16; xp = 4; }
     const a = Math.random() * Math.PI * 2;
-    const obj = this.add.circle(this.player.x + Math.cos(a) * 400, this.player.y + Math.sin(a) * 400, r, color).setDepth(5);
-    if (elite) obj.setStrokeStyle(3, 0xffffff);
-    this.enemies.push({ obj, hp: hp * scale, speed, dmg, r, xp, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0, elite, dead: false });
+    const obj = spr(this, this.player.x + Math.cos(a) * 400, this.player.y + Math.sin(a) * 400, key).setDepth(5);
+    this.enemies.push({ obj, hp: hp * scale, maxHp: hp * scale, speed, dmg, r, xp, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0, elite, dead: false });
   }
 
   private nearestTo(x: number, y: number, maxD = 1e9, skip?: Set<Enemy>): Enemy | null {
@@ -170,7 +183,7 @@ export class GameScene extends Phaser.Scene {
   private fire(s: SkillState, dmgS: number, echo: boolean): boolean {
     const { lv, m } = s, st = this.char.stats, P = this.player;
     const area = (1 + st.area) * m.area, extra = Math.round(st.proj) + m.proj, cdm = (1 - st.cdr) * m.cd;
-    const setCd = (v: number) => { if (!echo) s.cd = Math.max(0.2, v * cdm); };
+    const setCd = (v: number) => { if (!echo) { s.cd = Math.max(0.2, v * cdm); s.cdMax = s.cd; } };
 
     switch (s.id) {
       case 'blade': {
@@ -199,7 +212,7 @@ export class GameScene extends Phaser.Scene {
         const ang = Math.atan2(target.obj.y - P.y, target.obj.x - P.x), count = 1 + (lv >= 3 ? 1 : 0) + (lv >= 5 ? 1 : 0) + extra;
         for (let i = 0; i < count; i++) {
           const a = ang + (i - (count - 1) / 2) * 0.14;
-          const obj = this.add.circle(P.x, P.y, 5, SKILLS.bolt.color).setDepth(8);
+          const obj = spr(this, P.x, P.y, 'bolt').setDepth(8).setRotation(a);
           this.shots.push({ obj, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, life: 1.4, pierce: 1 + (lv >= 4 ? 1 : 0) + m.pierce, dmg: (10 + 3 * lv) * dmgS, hit: new Set(), m });
         }
         return true;
@@ -298,15 +311,15 @@ export class GameScene extends Phaser.Scene {
   private orbs(s: SkillState, dt: number): void {
     const { lv, m } = s, st = this.char.stats;
     const area = (1 + st.area) * m.area, want = 1 + Math.floor(lv / 2) + Math.round(st.proj) + m.proj;
-    while (s.orbs.length < want) s.orbs.push(this.add.circle(0, 0, 7, SKILLS.orbs.color).setDepth(9));
+    while (s.orbs.length < want) s.orbs.push(spr(this, 0, 0, 'orb').setDepth(9));
     s.angle += (dt * (2.6 + 0.15 * lv)) / Math.max(0.5, (1 - st.cdr) * m.cd);
     const R = 65 * area;
     s.orbs.forEach((o, i) => {
       const a = s.angle + (i / s.orbs.length) * Math.PI * 2;
-      o.setPosition(this.player.x + Math.cos(a) * R, this.player.y + Math.sin(a) * R);
+      o.setPosition(this.player.x + Math.cos(a) * R, this.player.y + Math.sin(a) * R).setRotation(a);
       for (const e of this.enemies.slice()) {
         if (e.dead || e.hitT > 0) continue;
-        if (this.dist(o, e.obj) < e.r + o.radius) this.hurt(e, 8 + 3 * lv, m);
+        if (this.dist(o, e.obj) < e.r + 10) this.hurt(e, 8 + 3 * lv, m);
       }
     });
   }
@@ -333,7 +346,7 @@ export class GameScene extends Phaser.Scene {
     const st = this.char.stats;
     const crit = Math.random() < st.crit + m.crit;
     const v = Math.max(1, base * (1 + st.dmg) * m.dmg * (crit ? 1 + st.critDmg : 1));
-    e.hp -= v; e.hitT = 0.35; e.obj.setAlpha(0.5);
+    e.hp -= v; e.hitT = 0.35; e.obj.setTintFill(0xffffff);
     const steal = st.steal + m.steal;
     if (steal > 0) this.heal(Math.min(3, v * steal));
     if (m.slow > 0) e.slowT = Math.max(e.slowT, m.slow);
@@ -350,7 +363,7 @@ export class GameScene extends Phaser.Scene {
     if (e.dead) return;
     e.dead = true;
     this.kills++;
-    this.gems.push({ obj: this.add.circle(e.obj.x, e.obj.y, 4, 0x8fa9ff).setDepth(3), v: e.xp });
+    this.gems.push({ obj: spr(this, e.obj.x, e.obj.y, 'xp').setDepth(3), v: e.xp });
     this.rollDrop(e);
     e.obj.destroy();
     this.enemies.splice(this.enemies.indexOf(e), 1);
@@ -359,8 +372,8 @@ export class GameScene extends Phaser.Scene {
   private pop(x: number, y: number, text: string, color: string, big: boolean): void {
     if (this.popCount > 30) return;
     this.popCount++;
-    const t = this.add.text(x, y, text, { fontSize: big ? '16px' : '11px', color, fontStyle: big ? 'bold' : 'normal', stroke: '#000', strokeThickness: 2 }).setOrigin(0.5).setDepth(50);
-    this.tweens.add({ targets: t, y: y - 22, alpha: 0, duration: 520, onComplete: () => { t.destroy(); this.popCount--; } });
+    const t = this.add.text(x, y, text, { fontSize: big ? '20px' : '13px', color, fontStyle: 'bold', stroke: '#000', strokeThickness: big ? 4 : 3 }).setOrigin(0.5).setDepth(50);
+    this.tweens.add({ targets: t, y: y - 26, alpha: 0, duration: 600, onComplete: () => { t.destroy(); this.popCount--; } });
   }
 
   // ---------- łup ----------
@@ -376,12 +389,12 @@ export class GameScene extends Phaser.Scene {
   }
   private spawnDrop(e: Enemy, item?: Item, skill?: SkillId, support?: SupportId): void {
     const x = e.obj.x, y = e.obj.y;
-    const obj = item
-      ? this.add.rectangle(x, y, 12, 12, RARITY_COLOR[item.rarity]).setAngle(45).setStrokeStyle(2, 0xffffff)
-      : this.add.star(x, y, 5, 5, 11, skill ? 0xd18bff : SUPPORTS[support as SupportId].color).setStrokeStyle(2, 0xffffff);
-    obj.setDepth(4);
-    this.tweens.add({ targets: obj, scale: 1.25, yoyo: true, repeat: -1, duration: 500 });
-    this.drops.push({ obj, item, skill, support });
+    const color = item ? RARITY_COLOR[item.rarity] : skill ? 0xd18bff : SUPPORTS[support as SupportId].color;
+    const obj = spr(this, x, y, item ? 'drop_item' : skill ? 'drop_star' : 'drop_hex').setTint(color).setDepth(4);
+    let beam: Phaser.GameObjects.Image | undefined;
+    if (!item || item.rarity >= 2) beam = spr(this, x, y - 30, 'beam').setTint(color).setBlendMode(Phaser.BlendModes.ADD).setDepth(3);
+    this.tweens.add({ targets: obj, scale: 1.3 / S, yoyo: true, repeat: -1, duration: 450 });
+    this.drops.push({ obj, beam, item, skill, support });
   }
   private updateDrops(): void {
     this.drops = this.drops.filter((d) => {
@@ -389,7 +402,7 @@ export class GameScene extends Phaser.Scene {
       this.found++;
       if (d.skill) {
         const r = this.char.addSkillGem(d.skill);
-        this.toast(r === 'new' ? `Nowy gem: ${SKILLS[d.skill].name}!` : r === 'up' ? `${SKILLS[d.skill].name}: wyższy poziom!` : `${SKILLS[d.skill].name}: maks. (+20 zł)`, '#d18bff');
+        this.toast(r === 'new' ? `NOWY GEM: ${SKILLS[d.skill].name}!` : r === 'up' ? `${SKILLS[d.skill].name}: wyższy poziom!` : `${SKILLS[d.skill].name}: maks. (+20 zł)`, '#d18bff');
       } else if (d.support) {
         const r = this.char.addSupportGem(d.support);
         this.toast(`Support: ${SUPPORTS[d.support].name}${r === 'sold' ? ' (pełno, sprzedany)' : ''}`, '#' + SUPPORTS[d.support].color.toString(16).padStart(6, '0'));
@@ -399,32 +412,43 @@ export class GameScene extends Phaser.Scene {
         this.hp = Math.min(this.char.maxHp, this.hp + Math.max(0, this.char.maxHp - old));
         this.toast(`${d.item.name}${r === 'equipped' ? ' (założony)' : r === 'bag' ? ' (w plecaku)' : ' (sprzedany)'}`, '#' + RARITY_COLOR[d.item.rarity].toString(16).padStart(6, '0'));
       }
-      d.obj.destroy();
+      d.obj.destroy(); d.beam?.destroy();
       return false;
     });
   }
 
   private toast(msg: string, color: string): void {
-    const t = this.add.text(this.scale.width / 2, 86, msg, { fontSize: '14px', color, fontStyle: 'bold', stroke: '#000', strokeThickness: 3, align: 'center', wordWrap: { width: 330 } })
+    const t = this.add.text(W / 2, 96, msg, { fontSize: '15px', color, fontStyle: 'bold', stroke: '#000', strokeThickness: 3, align: 'center', wordWrap: { width: 330 } })
       .setOrigin(0.5).setScrollFactor(0).setDepth(150);
-    this.tweens.add({ targets: t, y: 68, alpha: 0, delay: 1400, duration: 700, onComplete: () => t.destroy() });
+    this.tweens.add({ targets: t, y: 78, alpha: 0, delay: 1600, duration: 700, onComplete: () => t.destroy() });
   }
 
   private updateEnemies(dt: number): void {
     const armor = this.char.stats.armor;
+    this.ebars.clear();
     for (const e of this.enemies.slice()) {
-      if (e.hitT > 0) { e.hitT -= dt; if (e.hitT <= 0) { e.hitT = 0; e.obj.setAlpha(1); } }
+      if (e.hitT > 0) e.hitT = Math.max(0, e.hitT - dt);
       if (e.burnT > 0) { e.burnT -= dt; e.hp -= e.burnDps * dt; if (e.hp <= 0) { this.kill(e); continue; } }
       if (e.slowT > 0) e.slowT -= dt;
       if (e.frozenT > 0) e.frozenT -= dt;
+      if (e.hitT > 0.28) e.obj.setTintFill(0xffffff);
+      else if (e.frozenT > 0 || e.slowT > 0) e.obj.setTint(0x8fc4ff);
+      else if (e.burnT > 0) e.obj.setTint(0xffa060);
+      else e.obj.clearTint();
       const f = e.frozenT > 0 ? 0 : e.slowT > 0 ? 0.5 : 1;
       const a = Math.atan2(this.player.y - e.obj.y, this.player.x - e.obj.x);
       e.obj.x += Math.cos(a) * e.speed * f * dt; e.obj.y += Math.sin(a) * e.speed * f * dt;
+      if (e.elite || e.hp < e.maxHp * 0.999 && e.r >= 18) {
+        const w = e.r * 2.2, bx = e.obj.x - w / 2, by = e.obj.y - e.r - 12;
+        this.ebars.fillStyle(0x000000, 0.8).fillRect(bx - 1, by - 1, w + 2, 7);
+        this.ebars.fillStyle(e.elite ? 0xff9f1a : 0xc77dff).fillRect(bx, by, w * Math.max(0, e.hp / e.maxHp), 5);
+      }
       if (this.invuln <= 0 && this.dist(e.obj, this.player) < e.r + 12) {
         this.hp -= Math.max(e.dmg * 0.3, e.dmg - Math.min(armor, e.dmg * 0.7)); this.invuln = 0.6;
-        this.cameras.main.shake(80, 0.004);
+        this.cameras.main.shake(90, 0.006);
       }
     }
+    this.player.setAlpha(this.invuln > 0 ? 0.55 + 0.45 * Math.abs(Math.sin(this.time_ * 30)) : 1);
   }
 
   private updateGems(dt: number): void {
@@ -450,8 +474,8 @@ export class GameScene extends Phaser.Scene {
     const pts = this.level + (win ? 10 : 0);
     c.gold += gold; c.points += pts; c.runs++; c.best = Math.max(c.best, this.level);
     c.save();
-    const w = this.scale.width;
-    const dim = this.add.rectangle(0, 0, w, this.scale.height, 0x000000, 0.78).setOrigin(0).setScrollFactor(0).setDepth(200).setInteractive();
+    const w = W;
+    const dim = this.add.rectangle(0, 0, w, H, 0x000000, 0.78).setOrigin(0).setScrollFactor(0).setDepth(200).setInteractive();
     const m = Math.floor(this.time_ / 60), s = Math.floor(this.time_ % 60).toString().padStart(2, '0');
     this.add.text(w / 2, 240, win ? 'ZWYCIĘSTWO' : 'KONIEC WYPRAWY', { fontSize: '32px', color: win ? '#4ade80' : '#c9a4ff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     this.add.text(w / 2, 335, `Czas: ${m}:${s}\nZabici: ${this.kills}\nPoziom: ${this.level}\nZnalezione: ${this.found}\n\n+${pts} punktów drzewka\n+${gold} złota`, { fontSize: '18px', color: '#fff', align: 'center', lineSpacing: 4 }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
@@ -460,13 +484,32 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawHud(): void {
-    const w = this.scale.width, b = this.bars;
+    const b = this.bars, ch = this.char;
     b.clear();
-    b.fillStyle(0x222222).fillRect(0, 0, w, 10);
-    b.fillStyle(0x8fa9ff).fillRect(0, 0, w * Math.min(1, this.xp / (5 + this.level * 4)), 10);
-    b.fillStyle(0x222222).fillRect(8, 40, 120, 8);
-    b.fillStyle(0xef4444).fillRect(8, 40, 120 * Math.max(0, this.hp) / this.char.maxHp, 8);
+    // XP
+    b.fillStyle(0x000000, 0.6).fillRect(0, 0, W, 10);
+    b.fillStyle(0x8fa9ff).fillRect(0, 0, W * Math.min(1, this.xp / (5 + this.level * 4)), 10);
+    b.fillStyle(0xffffff, 0.35).fillRect(0, 0, W * Math.min(1, this.xp / (5 + this.level * 4)), 3);
+    b.lineStyle(1, 0x000000, 0.9).strokeRect(0, 0, W, 10);
+    // HP
+    const hpR = Math.max(0, this.hp) / ch.maxHp;
+    b.fillStyle(0x000000, 0.75).fillRect(8, 16, 140, 24);
+    b.fillStyle(hpR < 0.3 ? 0xff3b3b : 0xd7263d).fillRect(10, 18, 136 * hpR, 20);
+    b.fillStyle(0xffffff, 0.22).fillRect(10, 18, 136 * hpR, 6);
+    b.lineStyle(2, 0xffffff, 0.8).strokeRect(8, 16, 140, 24);
+    this.hpTxt.setText(`${Math.max(0, Math.ceil(this.hp))} / ${ch.maxHp}`);
     const m = Math.floor(this.time_ / 60), s = Math.floor(this.time_ % 60).toString().padStart(2, '0');
-    this.hud.setText(`Lv ${this.level}   ${m}:${s}   ☠ ${this.kills}\n\n${this.states.map((x) => `${SKILLS[x.id].name} ${x.lv}`).join(' | ')}`);
+    this.timeTxt.setText(`${m}:${s}`);
+    this.hudTxt.setText(`Poziom ${this.level}    ☠ ${this.kills}`);
+    // ikony umiejętności z odliczaniem
+    this.states.forEach((st, i) => {
+      const ic = this.icons[i];
+      if (!ic) return;
+      const r = st.id === 'orbs' ? 0 : Math.max(0, Math.min(1, st.cd / st.cdMax));
+      if (r > 0) { b.fillStyle(0x000000, 0.62).fillRect(ic.x - 20, ic.y - 20, 40, 40 * r); }
+      b.lineStyle(2, SKILLS[st.id].color, r > 0 ? 0.5 : 1).strokeRect(ic.x - 20, ic.y - 20, 40, 40);
+    });
+    // czerwona poświata przy niskim życiu
+    this.warn.setFillStyle(0xff0000, hpR < 0.3 ? 0.07 + 0.07 * Math.sin(this.time_ * 8) : 0);
   }
 }
