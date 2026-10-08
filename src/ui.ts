@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { CLASSES, MAX_SKILL, SKILLS, SKILL_IDS, STAT_LABEL, StatKey, SUPPORTS, SUPPORT_IDS, fmtStat, fmtStats } from './data';
+import { ATTACK_IDS, CLASSES, KIND_NAME, MAX_SKILL, SKILLS, SKILL_IDS, UTILITY_IDS, STAT_LABEL, StatKey, SUPPORTS, SUPPORT_IDS, fmtStat, fmtStats } from './data';
 import { BAG_SIZE, Character, getChar } from './char';
 import { Item, RARITY_COLOR, RARITY_NAME, SLOTS, SLOT_NAME, makeItem, sellValue } from './items';
 import { NODES, NODE_LIST, SECTORS, TreeNode, sectorColor } from './tree';
@@ -255,15 +255,16 @@ export class SkillsScene extends Phaser.Scene {
     this.layer.removeAll(true);
     this.put(this.add.text(10, 14, 'UMIEJĘTNOŚCI', { fontSize: '19px', color: '#c9a4ff', fontStyle: 'bold' }));
     this.put(btn(this, 330, 24, 50, 32, 'X', () => home(this), 0x4a2226, 0xc0392b, 15));
-    this.put(this.add.text(12, 50, 'Główne (po 5 supportów)', { fontSize: '12px', color: '#a8b0d0' }));
+    this.put(this.add.text(12, 50, 'Główne ataki (po 5 supportów)', { fontSize: '12px', color: '#a8b0d0' }));
     c.loadout.forEach((lo, i) => {
       const y = 80 + i * 40 + (i >= 3 ? 24 : 0);
-      if (i === 3) this.put(this.add.text(12, y - 33, 'Poboczne (po 2 supporty)', { fontSize: '12px', color: '#a8b0d0' }));
+      if (i === 3) this.put(this.add.text(12, y - 33, 'Pomocnicze (po 2 supporty)', { fontSize: '12px', color: '#a8b0d0' }));
       const sd = lo.skill ? SKILLS[lo.skill] : null;
       this.tile(62, y, 108, 38, sd ? sd.color : 0x2a3050, !!sel && sel.slot === i && sel.idx === null, () => { this.sel = { slot: i, idx: null }; this.note = ''; this.render(); });
       if (sd && lo.skill) {
         this.put(spr(this, 26, y, `ic_${lo.skill}`).setScale(32 / 44 / S));
-        this.put(this.add.text(45, y, `${sd.name}\npoz. ${c.skills[lo.skill]}`, { fontSize: '10px', color: hex(sd.color), fontStyle: 'bold', wordWrap: { width: 66 }, lineSpacing: 0 }).setOrigin(0, 0.5));
+        this.put(this.add.text(45, y, sd.name, { fontSize: '10px', color: hex(sd.color), fontStyle: 'bold', wordWrap: { width: 66 } }).setOrigin(0, 0.5));
+        this.put(this.add.text(42, y + 18, `${c.skills[lo.skill]}`, { fontSize: '11px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(1, 1));
       } else this.put(this.add.text(62, y, 'pusty slot', { fontSize: '11px', color: '#5a6392' }).setOrigin(0.5));
       lo.sup.forEach((sid, j) => {
         const sdef = sid ? SUPPORTS[sid] : null;
@@ -279,8 +280,8 @@ export class SkillsScene extends Phaser.Scene {
     if (sel) {
       const lo = c.loadout[sel.slot];
       if (sel.idx === null) {
-        if (lo.skill) { detail = `${SKILLS[lo.skill].name} (poz. ${c.skills[lo.skill]}/${MAX_SKILL})\n${SKILLS[lo.skill].desc}`; canRemove = true; }
-        else detail = this.note || 'Pusty slot. Wybierz umiejętność z listy.';
+        if (lo.skill) { detail = `${SKILLS[lo.skill].name} (${KIND_NAME[SKILLS[lo.skill].kind]}, poz. ${c.skills[lo.skill]}/${MAX_SKILL})\n${SKILLS[lo.skill].desc}`; canRemove = true; }
+        else detail = this.note || (sel.slot < 3 ? 'Pusty slot. Wybierz atak z listy.' : 'Pusty slot. Wybierz aurę, wzmocnienie lub sługę.');
       } else {
         const sid = lo.sup[sel.idx];
         if (sid) { detail = `${SUPPORTS[sid].name}\n${SUPPORTS[sid].desc}`; canRemove = true; }
@@ -295,31 +296,32 @@ export class SkillsScene extends Phaser.Scene {
 
     // lista gemów
     const showSupports = !!sel && sel.idx !== null;
-    this.put(this.add.text(12, 398, showSupports ? 'Twoje supporty (dotknij, aby włożyć)' : 'Twoje umiejętności (dotknij, aby włożyć)', { fontSize: '12px', color: '#a8b0d0' }));
-    const cell = (i: number) => ({ x: 48 + (i % 4) * 88, y: 444 + Math.floor(i / 4) * 62 });
+    this.put(this.add.text(12, 398, showSupports ? 'Twoje supporty (dotknij, aby włożyć)' : (sel ? (sel.slot < 3 ? 'Twoje ataki (dotknij, aby włożyć)' : 'Twoje gemy pomocnicze (dotknij, aby włożyć)') : 'Twoje gemy'), { fontSize: '12px', color: '#a8b0d0' }));
+    const cell = (i: number) => ({ x: 48 + (i % 4) * 88, y: 450 + Math.floor(i / 4) * 70 });
     if (showSupports) {
       const owned = SUPPORT_IDS.map((id) => ({ id, n: c.supportBag.filter((s) => s === id).length })).filter((o) => o.n > 0);
       if (!owned.length) this.put(this.add.text(W / 2, 480, 'Nie masz supportów.\nZnajdziesz je w łupie lub kupisz u handlarza.', { fontSize: '13px', color: '#8a82b4', align: 'center' }).setOrigin(0.5));
       owned.forEach((o, i) => {
         const { x, y } = cell(i), d = SUPPORTS[o.id];
-        this.tile(x, y, 84, 56, d.color, false, () => {
+        this.tile(x, y, 84, 64, d.color, false, () => {
           if (sel && sel.idx !== null) { c.setSupport(sel.slot, sel.idx, o.id); c.save(); this.note = `Włożono: ${d.name}`; } else this.note = `${d.name}: ${d.desc}`;
           this.render();
         });
-        this.put(this.add.text(x - 36, y - 10, d.short, { fontSize: '17px', color: hex(d.color), fontStyle: 'bold' }).setOrigin(0, 0.5));
-        this.put(this.add.text(x + 38, y - 18, `×${o.n}`, { fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0));
-        this.put(this.add.text(x, y + 16, d.name, { fontSize: '10px', color: '#e4e9ff', align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
+        this.put(this.add.text(x - 36, y - 14, d.short, { fontSize: '18px', color: hex(d.color), fontStyle: 'bold' }).setOrigin(0, 0.5));
+        this.put(this.add.text(x + 38, y - 24, `×${o.n}`, { fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0));
+        this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: '#e4e9ff', align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
       });
     } else {
-      SKILL_IDS.filter((id) => c.skills[id] > 0).forEach((id, i) => {
+      (sel ? (sel.slot < 3 ? ATTACK_IDS : UTILITY_IDS) : SKILL_IDS).filter((id) => c.skills[id] > 0).forEach((id, i) => {
         const { x, y } = cell(i), d = SKILLS[id];
-        this.tile(x, y, 84, 56, d.color, false, () => {
+        this.tile(x, y, 84, 64, d.color, false, () => {
           if (sel && sel.idx === null) { c.setSkill(sel.slot, id); c.save(); this.note = ''; } else this.note = `${d.name}: ${d.desc}`;
           this.render();
         });
-        this.put(spr(this, x - 26, y - 6, `ic_${id}`).setScale(30 / 44 / S));
-        this.put(this.add.text(x + 38, y - 18, `poz. ${c.skills[id]}`, { fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0));
-        this.put(this.add.text(x, y + 17, d.name, { fontSize: '10px', color: hex(d.color), align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
+        this.put(spr(this, x - 22, y - 14, `ic_${id}`).setScale(30 / 44 / S));
+        this.put(this.add.text(x + 38, y - 26, KIND_NAME[d.kind], { fontSize: '10px', color: '#a8b0d0' }).setOrigin(1, 0));
+        this.put(this.add.text(x + 38, y - 13, `poz. ${c.skills[id]}`, { fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0));
+        this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: hex(d.color), align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
       });
     }
   }

@@ -5,7 +5,7 @@ export interface Stats {
 export type StatKey = keyof Stats;
 
 export const BASE_STATS: Stats = {
-  dmg: 0, cdr: 0, hp: 0, regen: 0, speed: 0, crit: 0.05, critDmg: 0.5,
+  dmg: 0, cdr: 0, hp: 0, regen: 0.4, speed: 0, crit: 0.05, critDmg: 0.5,
   area: 0, proj: 0, steal: 0, armor: 0, xp: 0, magnet: 0, gold: 0, drop: 0,
 };
 
@@ -36,23 +36,59 @@ export function fmtShort(s: Partial<Stats>): string {
   }).join(' · ');
 }
 
-// ---------- umiejętności aktywne (gemy) ----------
-export type SkillId = 'blade' | 'orbs' | 'bolt' | 'nova' | 'chain' | 'meteor' | 'heal' | 'tentacles' | 'spikes';
+// ---------- gemy: ataki (sloty główne) i pomocnicze (sloty poboczne) ----------
+export type SkillKind = 'attack' | 'aura' | 'buff' | 'minion';
+export type SkillId =
+  | 'blade' | 'orbs' | 'bolt' | 'nova' | 'chain' | 'meteor' | 'tentacles' | 'spikes' | 'rift' | 'lance' | 'scythe' | 'swarm'
+  | 'heal' | 'frenzy' | 'ward' | 'haste'
+  | 'a_fury' | 'a_haste' | 'a_guard' | 'a_sight'
+  | 'm_eye' | 'm_servant';
 export const MAX_SKILL = 5;
 
-export interface SkillDef { name: string; desc: string; color: number }
+export interface SkillDef { name: string; desc: string; color: number; kind: SkillKind }
 export const SKILLS: Record<SkillId, SkillDef> = {
-  blade: { name: 'Rytualne Cięcie', desc: 'Półkolisty cios sztyletem ofiarnym', color: 0xff6b81 },
-  orbs: { name: 'Oczy Starszych', desc: 'Pradawne oczy krążą wokół ciebie', color: 0xb58cff },
-  bolt: { name: 'Szept Pustki', desc: 'Pocisk z pustki w najbliższego wroga', color: 0x4ff0d2 },
-  nova: { name: 'Fala Koszmaru', desc: 'Fala snu rani i spowalnia wrogów dookoła', color: 0x7fb7ff },
-  chain: { name: 'Gwiezdny Piorun', desc: 'Piorun z gwiazd przeskakuje między wrogami', color: 0xf7e56b },
-  meteor: { name: 'Upadek Gwiazdy', desc: 'Spadająca gwiazda z opóźnieniem', color: 0xff9a4d },
-  heal: { name: 'Komunia z Głębią', desc: 'Leczy cię i rani pobliskich wrogów', color: 0x6ee79a },
-  tentacles: { name: 'Macki z Głębi', desc: 'Macki chwytają wrogów i przyciągają ich do ciebie', color: 0xc77dff },
-  spikes: { name: 'Kościane Kolce', desc: 'Kolce wyrastają z ziemi pod wrogami', color: 0xe8dcc0 },
+  blade: { kind: 'attack', name: 'Rytualne Cięcie', desc: 'Półkolisty cios sztyletem ofiarnym', color: 0xff6b81 },
+  orbs: { kind: 'attack', name: 'Oczy Starszych', desc: 'Pradawne oczy krążą wokół ciebie', color: 0xb58cff },
+  bolt: { kind: 'attack', name: 'Szept Pustki', desc: 'Pocisk z pustki w najbliższego wroga', color: 0x4ff0d2 },
+  nova: { kind: 'attack', name: 'Fala Koszmaru', desc: 'Fala snu rani i spowalnia wrogów dookoła', color: 0x7fb7ff },
+  chain: { kind: 'attack', name: 'Gwiezdny Piorun', desc: 'Piorun z gwiazd przeskakuje między wrogami', color: 0xf7e56b },
+  meteor: { kind: 'attack', name: 'Upadek Gwiazdy', desc: 'Spadająca gwiazda z opóźnieniem', color: 0xff9a4d },
+  tentacles: { kind: 'attack', name: 'Macki z Głębi', desc: 'Macki chwytają wrogów i przyciągają ich do ciebie', color: 0xc77dff },
+  spikes: { kind: 'attack', name: 'Kościane Kolce', desc: 'Kolce wyrastają z ziemi pod wrogami', color: 0xe8dcc0 },
+  rift: { kind: 'attack', name: 'Szczelina Światów', desc: 'Pęknięcie w świecie rani wrogów w strefie przez kilka sekund', color: 0xd36bff },
+  lance: { kind: 'attack', name: 'Włócznia Gwiazd', desc: 'Szybka włócznia przebija całe szeregi wrogów', color: 0xfff2a8 },
+  scythe: { kind: 'attack', name: 'Kosa Żniwiarza', desc: 'Kosa leci przed siebie i wraca, tnąc w obie strony', color: 0xff5470 },
+  swarm: { kind: 'attack', name: 'Rój Szeptów', desc: 'Naprowadzane widma ścigają wrogów', color: 0x6ee7ff },
+  heal: { kind: 'buff', name: 'Komunia z Głębią', desc: 'Co kilka sekund leczy cię i rani pobliskich wrogów', color: 0x6ee79a },
+  frenzy: { kind: 'buff', name: 'Szał Ofiarny', desc: 'Co kilka sekund: +obrażenia i +szybkość na krótko', color: 0xff6b3d },
+  ward: { kind: 'buff', name: 'Tarcza Pradawnych', desc: 'Co kilka sekund: tarcza pochłaniająca obrażenia', color: 0x8fd3ff },
+  haste: { kind: 'buff', name: 'Wypaczenie Czasu', desc: 'Co kilka sekund: twoje moce odnawiają się szybciej', color: 0xffe066 },
+  a_fury: { kind: 'aura', name: 'Aura Furii', desc: 'Stała premia do obrażeń', color: 0xff4d6d },
+  a_haste: { kind: 'aura', name: 'Aura Czasu', desc: 'Stała premia do odnowienia i szybkości ruchu', color: 0xffd36b },
+  a_guard: { kind: 'aura', name: 'Aura Straży', desc: 'Stała premia do pancerza i regeneracji', color: 0xa77bff },
+  a_sight: { kind: 'aura', name: 'Aura Wizji', desc: 'Stała premia do krytyków i obszaru', color: 0x3fe0c5 },
+  m_eye: { kind: 'minion', name: 'Latające Oko', desc: 'Oko krąży przy tobie i strzela do wrogów', color: 0xc9a4ff },
+  m_servant: { kind: 'minion', name: 'Sługa Głębin', desc: 'Sługa goni wrogów i gryzie ich', color: 0x8f6bd6 },
 };
 export const SKILL_IDS = Object.keys(SKILLS) as SkillId[];
+export const ATTACK_IDS = SKILL_IDS.filter((id) => SKILLS[id].kind === 'attack');
+export const UTILITY_IDS = SKILL_IDS.filter((id) => SKILLS[id].kind !== 'attack');
+export const KIND_NAME: Record<SkillKind, string> = { attack: 'atak', aura: 'aura', buff: 'buff', minion: 'sługa' };
+
+// ---------- poziomy postaci ----------
+/** XP potrzebne do wejścia z poziomu L na L+1 (rośnie mocno) */
+export const xpNeed = (level: number): number => Math.round(30 * Math.pow(1.22, level - 1));
+
+// ---------- tryby wypraw ----------
+export type ModeId = 'quick' | 'long';
+export interface ModeDef {
+  name: string; desc: string; target: number; hpMul: number; dmgMul: number; xpMul: number; goldMul: number;
+  eliteEvery: number; boss: boolean; spawn0: number; spawn1: number; ramp: number; color: number;
+}
+export const MODES: Record<ModeId, ModeDef> = {
+  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–2 min · 120 wrogów', target: 120, hpMul: 0.8, dmgMul: 0.8, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, spawn0: 0.7, spawn1: 0.5, ramp: 0.4, color: 0x4ade80 },
+  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 5 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.6, dmgMul: 1.3, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, spawn0: 0.65, spawn1: 0.4, ramp: 0.9, color: 0xff4d6d },
+};
 
 // ---------- supporty ----------
 export type SupportId = 'multi' | 'power' | 'swift' | 'area' | 'pierce' | 'crit' | 'vamp' | 'chill' | 'echo' | 'burn' | 'knock' | 'focus';

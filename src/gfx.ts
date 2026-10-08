@@ -80,9 +80,22 @@ function skillGlyph(p: Pen, id: SkillId, cx: number, cy: number, c: number): voi
     case 'nova': p.ring(cx, cy, 5, c, 3).ring(cx, cy, 11, c, 2.5); break;
     case 'chain': p.path([[cx - 4, cy - 12], [cx + 4, cy - 3], [cx - 4, cy + 1], [cx + 5, cy + 12]], c, 4); break;
     case 'meteor': p.circle(cx + 4, cy + 4, 7, c).line(cx - 11, cy - 11, cx - 2, cy - 2, c, 3).line(cx - 12, cy - 4, cx - 5, cy + 1, c, 2.5); break;
-    case 'heal': p.rect(cx - 3, cy - 11, 6, 22, c).rect(cx - 11, cy - 3, 22, 6, c); break;
     case 'tentacles': p.path(Array.from({ length: 12 }, (_, i) => [cx - 11 + i * 2, cy + Math.sin(i * 0.9) * 7]), c, 4); break;
     case 'spikes': p.poly([[cx - 12, cy + 10], [cx - 7, cy - 8], [cx - 2, cy + 10]], c).poly([[cx - 3, cy + 10], [cx + 3, cy - 12], [cx + 9, cy + 10]], c); break;
+    case 'rift': p.arc(cx, cy, 11, 0.3, Math.PI * 1.7, c, 3.5).arc(cx, cy, 6, Math.PI, Math.PI * 2.6, c, 3).circle(cx, cy, 2, c); break;
+    case 'lance': p.line(cx - 13, cy + 8, cx + 8, cy - 8, c, 4).poly([[cx + 13, cy - 12], [cx + 3, cy - 9], [cx + 9, cy - 3]], c); break;
+    case 'scythe': p.arc(cx, cy + 3, 12, Math.PI * 1.05, Math.PI * 1.95, c, 4.5).line(cx + 9, cy - 6, cx + 9, cy + 12, c, 3); break;
+    case 'swarm': [[-8, -7], [3, -9], [-2, 1], [8, 7], [-9, 8]].forEach(([dx, dy]) => { p.circle(cx + dx, cy + dy, 3.4, c).line(cx + dx - 6, cy + dy + 4, cx + dx - 2, cy + dy + 1.5, c, 1.8); }); break;
+    case 'heal': p.rect(cx - 3, cy - 11, 6, 22, c).rect(cx - 11, cy - 3, 22, 6, c); break;
+    case 'frenzy': p.poly([[cx, cy - 13], [cx + 8, cy - 1], [cx + 5, cy + 12], [cx - 5, cy + 12], [cx - 8, cy - 1], [cx - 3, cy - 4]], c); break;
+    case 'ward': p.poly([[cx - 10, cy - 10], [cx + 10, cy - 10], [cx + 9, cy + 3], [cx, cy + 13], [cx - 9, cy + 3]], undefined, c, 3.5); p.line(cx, cy - 6, cx, cy + 6, c, 3); break;
+    case 'haste': p.ring(cx, cy, 11, c, 3).line(cx, cy, cx, cy - 7, c, 3).line(cx, cy, cx + 6, cy + 3, c, 3); break;
+    case 'a_fury': p.ring(cx, cy, 12, c, 2.5, 0.8).path([[cx - 6, cy + 3], [cx, cy - 5], [cx + 6, cy + 3]], c, 3.5).path([[cx - 6, cy + 9], [cx, cy + 1], [cx + 6, cy + 9]], c, 3.5); break;
+    case 'a_haste': p.ring(cx, cy, 12, c, 2.5, 0.8).line(cx, cy, cx, cy - 7, c, 3).line(cx, cy, cx + 6, cy + 3, c, 3); break;
+    case 'a_guard': p.ring(cx, cy, 12, c, 2.5, 0.8).poly([[cx - 6, cy - 6], [cx + 6, cy - 6], [cx + 5, cy + 2], [cx, cy + 8], [cx - 5, cy + 2]], c); break;
+    case 'a_sight': p.ring(cx, cy, 12, c, 2.5, 0.8).ellipse(cx, cy, 15, 9, c).circle(cx, cy, 3, BLACK); break;
+    case 'm_eye': p.ellipse(cx, cy, 16, 11, c).circle(cx, cy, 4, BLACK).poly([[cx - 8, cy - 2], [cx - 15, cy - 8], [cx - 10, cy + 2]], c).poly([[cx + 8, cy - 2], [cx + 15, cy - 8], [cx + 10, cy + 2]], c); break;
+    case 'm_servant': p.circle(cx, cy - 3, 8, c).circle(cx - 3, cy - 4, 1.8, BLACK).circle(cx + 3, cy - 4, 1.8, BLACK).path([[cx - 5, cy + 4], [cx - 7, cy + 11]], c, 3).path([[cx, cy + 5], [cx, cy + 12]], c, 3).path([[cx + 5, cy + 4], [cx + 7, cy + 11]], c, 3); break;
   }
 }
 
@@ -130,6 +143,20 @@ export function makeTextures(scene: Phaser.Scene): void {
   tex(scene, 'beam', 12, 90, (p) => { for (let i = 0; i < 18; i++) p.rect(2 + i * 0.2, 90 - (i + 1) * 5, 8 - i * 0.4, 5, 0xffffff, 0.5 * (1 - i / 18)); });
   tex(scene, 'bolt', 28, 14, (p) => { p.poly([[1, 7], [10, 1], [27, 7], [10, 13]], 0x4ff0d2, BLACK, 2).line(6, 7, 22, 7, 0xffffff, 2.5); });
   tex(scene, 'orb', 26, 26, (p) => { p.circle(13, 13, 12, BLACK).circle(13, 13, 10.5, 0xb58cff).ellipse(13, 13, 15, 10, 0xffffff).circle(13, 13, 3.6, BLACK).circle(12, 12, 1.2, 0xffffff); });
+  tex(scene, 'lance', 48, 12, (p) => { p.poly([[1, 6], [14, 1], [47, 6], [14, 11]], 0xfff2a8, BLACK, 2).line(10, 6, 40, 6, 0xffffff, 2.5); });
+  tex(scene, 'scythe', 44, 44, (p) => { p.arc(22, 22, 15, Math.PI * 1.1, Math.PI * 2.0, BLACK, 9).arc(22, 22, 15, Math.PI * 1.1, Math.PI * 2.0, 0xff5470, 5.5).circle(22, 22, 3, 0xffffff); });
+  tex(scene, 'wisp', 20, 20, (p) => { p.circle(10, 10, 9, 0x6ee7ff, 0.35).circle(10, 10, 6, 0x6ee7ff).circle(10, 10, 3, 0xffffff); });
+  tex(scene, 'mn_eye', 36, 30, (p) => {
+    p.ellipse(18, 26, 18, 5, BLACK, 0.45);
+    p.poly([[9, 13], [0, 5], [6, 18]], 0xc9a4ff, BLACK, 1.5).poly([[27, 13], [36, 5], [30, 18]], 0xc9a4ff, BLACK, 1.5);
+    p.ellipse(18, 14, 22, 17, BLACK).ellipse(18, 14, 19, 14, 0xe8d9ff).circle(18, 14, 5.5, 0x6b4aa0).circle(18, 14, 2.4, BLACK).circle(16.5, 12.5, 1.2, 0xffffff);
+  });
+  tex(scene, 'mn_servant', 34, 40, (p) => {
+    p.ellipse(17, 36, 20, 6, BLACK, 0.45);
+    p.circle(17, 15, 12.5, BLACK).circle(17, 15, 11, 0x8f6bd6);
+    [[8, 24, 6, 34], [17, 26, 17, 36], [26, 24, 28, 34]].forEach(([a, b, c2, d]) => { p.line(a, b, c2, d, BLACK, 5.5).line(a, b, c2, d, 0x8f6bd6, 3); });
+    p.circle(13, 13, 3.2, 0xffffff).circle(21, 13, 3.2, 0xffffff).circle(13, 13.5, 1.4, BLACK).circle(21, 13.5, 1.4, BLACK);
+  });
   // ----- ikony umiejętności -----
   SKILL_IDS.forEach((id) => tex(scene, `ic_${id}`, 44, 44, (p) => {
     const c = SKILLS[id].color;

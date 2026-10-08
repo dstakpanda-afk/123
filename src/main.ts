@@ -4,6 +4,7 @@ import { GameScene } from './game';
 import { TreeScene, InvScene, SkillsScene, ShopScene } from './ui';
 import { H, S, W, makeTextures, patchText } from './gfx';
 import { makeItem } from './items';
+import * as tree from './tree';
 
 class BootScene extends Phaser.Scene {
   constructor() { super('boot'); }
@@ -23,4 +24,4 @@ const game = new Phaser.Game({
   input: { activePointers: 2 },
   scene: [BootScene, MenuScene, ClassScene, GameScene, TreeScene, InvScene, SkillsScene, ShopScene],
 });
-Object.assign(window, { __phaser: game, __mk: makeItem }); // do testów
+Object.assign(window, { __phaser: game, __mk: makeItem, __tree: tree }); // do testów
