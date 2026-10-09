@@ -25,18 +25,23 @@ export class MenuScene extends Phaser.Scene {
     g.fillStyle(0x000000, 0.8).fillRect(40, 90, 280, 16).fillStyle(0x8fa9ff).fillRect(42, 92, 276 * Math.min(1, c.xp / need), 12).lineStyle(2, 0xffffff, 0.7).strokeRect(40, 90, 280, 16);
     this.add.text(w / 2, 98, `XP ${Math.floor(c.xp)} / ${need}`, { fontSize: '11px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5);
     this.add.text(w / 2, 124, `Punkty drzewka: ${c.points}   ·   Złoto: ${c.gold}`, { fontSize: '14px', color: '#fff' }).setOrigin(0.5);
-    this.add.text(w / 2, 144, `Wyprawy: ${c.runs}   ·   Wygrane: ${c.wins}`, { fontSize: '12px', color: '#8f86b3' }).setOrigin(0.5);
+    c.checkDay();
+    this.add.text(16, 144, `Wyprawy: ${c.runs} · Wygrane: ${c.wins}`, { fontSize: '12px', color: '#8f86b3' }).setOrigin(0, 0.5);
+    {
+      const rd = c.dailyReady();
+      button(this, 290, 143, 104, 20, rd ? `DZIENNE (${rd})` : 'DZIENNE', () => this.scene.start('daily'), rd ? 0x5a4a14 : 0x22304f, rd ? 0xffd86b : 0x4d6bb3, 12);
+    }
 
     (['quick', 'long', 'free'] as ModeId[]).forEach((id, i) => {
-      const md = MODES[id], y = 182 + i * 58, tint = id === 'quick' ? 0x1d3d2c : id === 'long' ? 0x4a1f2b : 0x2c2350;
-      const r = this.add.rectangle(w / 2, y, 330, 52, tint).setStrokeStyle(3, md.color).setInteractive();
-      this.add.text(w / 2, y - 17, md.name, { fontSize: '15px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
+      const md = MODES[id], y = 188 + i * 55, tint = id === 'quick' ? 0x1d3d2c : id === 'long' ? 0x4a1f2b : 0x2c2350;
+      const r = this.add.rectangle(w / 2, y, 330, 50, tint).setStrokeStyle(3, md.color).setInteractive();
+      this.add.text(w / 2, y - 16, md.name, { fontSize: '15px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
       const desc = id === 'long' ? `ok. 4–6 min · 500 wrogów · ×2 XP, ×3 złota\nboss krainy · 1. pokonanie każdego: +${BOSS_POINTS} pkt` : id === 'free' ? `${md.desc}${c.totals.maxFloor ? `\nrekord: piętro ${c.totals.maxFloor}` : ''}` : md.desc;
-      this.add.text(w / 2, y + 7, desc, { fontSize: '10px', color: '#e4e9ff', align: 'center', lineSpacing: 1 }).setOrigin(0.5);
+      this.add.text(w / 2, y + 6, desc, { fontSize: '10px', color: '#e4e9ff', align: 'center', lineSpacing: 1 }).setOrigin(0.5);
       r.on('pointerup', () => this.scene.start('game', { mode: id }));
     });
     {
-      const ty = 346, t = c.totals;
+      const ty = 349, t = c.totals;
       t.tier = Math.max(1, Math.min(t.maxTier, t.tier));
       this.add.rectangle(w / 2, ty, 330, 26, 0x1b1530).setStrokeStyle(2, 0x6f5bc4);
       const lbl = this.add.text(w / 2, ty, '', { fontSize: '12px', color: '#e6d6ff', fontStyle: 'bold' }).setOrigin(0.5);

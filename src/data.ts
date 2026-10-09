@@ -1,3 +1,4 @@
+import { EXTRA_GEMS } from './gemdata';
 export interface Stats {
   dmg: number; cdr: number; hp: number; regen: number; speed: number; crit: number; critDmg: number;
   area: number; proj: number; steal: number; armor: number; xp: number; magnet: number; gold: number; drop: number;
@@ -38,15 +39,23 @@ export function fmtShort(s: Partial<Stats>): string {
 
 // ---------- gemy: ataki (sloty główne) i pomocnicze (sloty poboczne) ----------
 export type SkillKind = 'attack' | 'aura' | 'buff' | 'minion';
-export type SkillId =
-  | 'blade' | 'orbs' | 'bolt' | 'nova' | 'chain' | 'meteor' | 'tentacles' | 'spikes' | 'rift' | 'lance' | 'scythe' | 'swarm'
-  | 'heal' | 'frenzy' | 'ward' | 'haste'
-  | 'a_fury' | 'a_haste' | 'a_guard' | 'a_sight'
-  | 'm_eye' | 'm_servant';
-export const MAX_SKILL = 5;
+export type SkillId = string;
+export const MAX_SKILL = 8;
 
-export interface SkillDef { name: string; desc: string; color: number; kind: SkillKind }
-export const SKILLS: Record<SkillId, SkillDef> = {
+/** parametry bazowe gemu zależne od poziomu (wspólne dla gry i podsumowania) */
+export interface Base { dmg: number; cd: number; count: number; range: number; pierce: number; dur: number; a: number; b: number }
+/** archetypy ataków obsługiwane przez wspólny silnik */
+export type Arch = 'proj' | 'cone' | 'beam' | 'nova' | 'blast' | 'zone' | 'chain' | 'arc' | 'orbit' | 'boom' | 'home' | 'trap' | 'line' | 'ring' | 'totem';
+export interface Eng { spd?: number; life?: number; spread?: number; arc?: number; delay?: number; w?: number; len?: number; tex?: string; sz?: number }
+export interface SkillDef {
+  kind: SkillKind; name: string; desc: string; color: number;
+  lv?: number; arch?: Arch; base?: (lv: number) => Partial<Base>; e?: Eng; fx?: Partial<Mods>;
+  stats?: [StatKey, 'a' | 'b', number][];
+  act?: { t: 'slow' | 'burn' | 'thorn'; R: number; tick: number };
+  buff?: 'crit' | 'freeze' | 'phase' | 'lifeline' | 'blink' | 'magnet';
+  mn?: 'shoot' | 'melee' | 'swarm' | 'turret' | 'bomber' | 'heal';
+}
+const CORE: Record<string, SkillDef> = {
   blade: { kind: 'attack', name: 'Rytualne Cięcie', desc: 'Półkolisty cios sztyletem ofiarnym', color: 0xff6b81 },
   orbs: { kind: 'attack', name: 'Oczy Starszych', desc: 'Pradawne oczy krążą wokół ciebie', color: 0xb58cff },
   bolt: { kind: 'attack', name: 'Szept Pustki', desc: 'Pocisk z pustki w najbliższego wroga', color: 0x4ff0d2 },
@@ -70,6 +79,7 @@ export const SKILLS: Record<SkillId, SkillDef> = {
   m_eye: { kind: 'minion', name: 'Latające Oko', desc: 'Oko krąży przy tobie i strzela do wrogów', color: 0xc9a4ff },
   m_servant: { kind: 'minion', name: 'Sługa Głębin', desc: 'Sługa goni wrogów i gryzie ich', color: 0x8f6bd6 },
 };
+export const SKILLS: Record<SkillId, SkillDef> = { ...CORE, ...EXTRA_GEMS };
 export const SKILL_IDS = Object.keys(SKILLS) as SkillId[];
 export const ATTACK_IDS = SKILL_IDS.filter((id) => SKILLS[id].kind === 'attack');
 export const UTILITY_IDS = SKILL_IDS.filter((id) => SKILLS[id].kind !== 'attack');
@@ -98,12 +108,23 @@ export const tierDmg = (t: number): number => 1 + 0.25 * (t - 1);
 export const tierReward = (t: number): number => 1 + 0.3 * (t - 1);
 
 // ---------- supporty ----------
-export type SupportId = 'multi' | 'power' | 'swift' | 'area' | 'pierce' | 'crit' | 'vamp' | 'chill' | 'echo' | 'burn' | 'knock' | 'focus';
+export type SupportId = string;
 /** dmg, cd, area mnożą się; reszta sumuje */
 export interface Mods { dmg: number; cd: number; area: number; proj: number; pierce: number; crit: number; steal: number; slow: number; burn: number; knock: number; echo: number }
 export const NO_MODS: Mods = { dmg: 1, cd: 1, area: 1, proj: 0, pierce: 0, crit: 0, steal: 0, slow: 0, burn: 0, knock: 0, echo: 0 };
 export interface SupportDef { name: string; short: string; desc: string; color: number; mods: Partial<Mods> }
 export const SUPPORTS: Record<SupportId, SupportDef> = {
+  brutal: { name: 'Brutalność', short: 'Br', desc: '+40% obrażeń, +30% odnowienia, odrzut', color: 0xd9824a, mods: { dmg: 1.4, cd: 1.3, knock: 1 } },
+  rapid: { name: 'Gorączka', short: 'Gr', desc: '-35% odnowienia, -25% obrażeń', color: 0xffb347, mods: { cd: 0.65, dmg: 0.75 } },
+  volley: { name: 'Salwa', short: 'Sl', desc: '+3 pociski/cele, -35% obrażeń, +15% odnowienia', color: 0x5fe8c8, mods: { proj: 3, dmg: 0.65, cd: 1.15 } },
+  inferno: { name: 'Żar', short: 'Żr', desc: 'Podpala 70% obrażeń przez 3 s, +10% obrażeń', color: 0xff7a3d, mods: { burn: 0.7, dmg: 1.1 } },
+  permafrost: { name: 'Wieczny Mróz', short: 'Mz', desc: 'Spowalnia na 3 s, +10% obrażeń, +10% odnowienia', color: 0x8fd3ff, mods: { slow: 3, dmg: 1.1, cd: 1.1 } },
+  lethal: { name: 'Zabójca', short: 'Zb', desc: '+25% szansy na krytyk, +15% obrażeń, +15% odnowienia', color: 0xffd24d, mods: { crit: 0.25, dmg: 1.15, cd: 1.15 } },
+  leech: { name: 'Krwiopijca', short: 'Kp', desc: '+8% kradzieży życia, -15% obrażeń', color: 0xc0314f, mods: { steal: 0.08, dmg: 0.85 } },
+  reach: { name: 'Zasięg', short: 'Zs', desc: '+60% obszaru, -15% obrażeń, +10% odnowienia', color: 0x6fa8ff, mods: { area: 1.6, dmg: 0.85, cd: 1.1 } },
+  ricochet: { name: 'Rykoszet', short: 'Ry', desc: 'Przebija +4 wrogów, piorun +4 skoki, -10% obrażeń', color: 0xb98cff, mods: { pierce: 4, dmg: 0.9 } },
+  overload: { name: 'Przeciążenie', short: 'Pz', desc: '+80% obrażeń, +50% odnowienia, -20% obszaru', color: 0xff5470, mods: { dmg: 1.8, cd: 1.5, area: 0.8 } },
+  twin: { name: 'Bliźniak', short: 'Bl', desc: 'Powtarza się (70%), +1 pocisk, -10% obrażeń', color: 0xa8e0ff, mods: { echo: 1, proj: 1, dmg: 0.9 } },
   multi: { name: 'Wielokrotność', short: 'Wk', desc: '+2 pociski/cele/oczy/cięcia. -20% obrażeń', color: 0x4ff0d2, mods: { proj: 2, dmg: 0.8 } },
   power: { name: 'Zwiększona Moc', short: 'Mc', desc: '+30% obrażeń, +10% czasu odnowienia', color: 0xff6b81, mods: { dmg: 1.3, cd: 1.1 } },
   swift: { name: 'Pośpiech', short: 'Pś', desc: '-25% czasu odnowienia, -10% obrażeń', color: 0xffd36b, mods: { cd: 0.75, dmg: 0.9 } },
@@ -161,8 +182,8 @@ export const BOSSES: BossDef[] = [
 export const BOSS_POINTS = 3;
 export const bossFor = (biome: string): BossDef => BOSSES.find((b) => b.biome === biome) ?? BOSSES[0];
 
-export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number; maxFloor: number; tier: number; maxTier: number }
-export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0, maxFloor: 0, tier: 1, maxTier: 1 };
+export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number; maxFloor: number; disc: number; tier: number; maxTier: number }
+export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0, maxFloor: 0, disc: 0, tier: 1, maxTier: 1 };
 export interface Achievement { id: string; name: string; desc: string; pts: number; goal: number; value: (t: Totals, level: number) => number }
 export const ACHIEVEMENTS: Achievement[] = [
   { id: 'kill100', name: 'Pierwsza krew', desc: 'Pokonaj 100 wrogów', pts: 1, goal: 100, value: (t) => t.kills },
@@ -181,5 +202,9 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'legend', name: 'Legenda', desc: 'Znajdź legendarny przedmiot', pts: 2, goal: 1, value: (t) => t.legendary },
   { id: 'floor5', name: 'Głębiny', desc: 'Dotrzyj do 5. piętra w trybie wolnym', pts: 2, goal: 5, value: (t) => t.maxFloor },
   { id: 'floor10', name: 'Bez dna', desc: 'Dotrzyj do 10. piętra w trybie wolnym', pts: 3, goal: 10, value: (t) => t.maxFloor },
+  { id: 'disc15', name: 'Uczeń', desc: 'Poznaj 15 różnych gemów', pts: 1, goal: 15, value: (t) => t.disc },
+  { id: 'disc35', name: 'Znawca', desc: 'Poznaj 35 różnych gemów', pts: 2, goal: 35, value: (t) => t.disc },
+  { id: 'disc60', name: 'Kolekcjoner Otchłani', desc: 'Poznaj 60 różnych gemów', pts: 3, goal: 60, value: (t) => t.disc },
+  { id: 'disc90', name: 'Pan Gemów', desc: 'Poznaj wszystkie gemy', pts: 4, goal: Object.keys(SKILLS).length, value: (t) => t.disc },
   { id: 'maxgem', name: 'Wyszkolony', desc: 'Rozwiń gem do maks. poziomu', pts: 2, goal: 1, value: (t) => t.maxSkill },
 ];

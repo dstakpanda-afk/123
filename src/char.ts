@@ -1,4 +1,6 @@
-import { ACHIEVEMENTS, Achievement, BOSS_POINTS, BASE_STATS, CLASSES, ClassId, MAX_SKILL, NO_TOTALS, SKILLS, SKILL_IDS, SUPPORT_IDS, SkillId, StatKey, Stats, SupportId, Totals, xpNeed } from './data';
+import { LOGIN_REWARDS, QUESTS, DailyState, Track, newDaily, refreshDaily } from './daily';
+import { pickGem } from './skills';
+import { ACHIEVEMENTS, Achievement, BOSS_POINTS, BASE_STATS, CLASSES, ClassId, MAX_SKILL, NO_TOTALS, SKILLS, SKILL_IDS, SUPPORT_IDS, SUPPORTS, SkillId, StatKey, Stats, SupportId, Totals, xpNeed } from './data';
 import { Item, Slot, itemScore, makeItem, sellValue, syncUid } from './items';
 import { CLASS_START, NODES, TREE_VERSION } from './tree';
 
@@ -15,6 +17,7 @@ export const newLoadout = (): LoadoutSlot[] => [5, 5, 5, 2, 2, 2].map((n) => ({ 
 export class Character {
   points = 0; pointsTotal = 0; gold = 200; runs = 0; wins = 0; level = 1; xp = 0;
   totals: Totals = { ...NO_TOTALS };
+  daily: DailyState = newDaily();
   done: Record<string, boolean> = {};
   bosses: Record<string, boolean> = {};
   alloc = new Set<string>();
@@ -130,11 +133,45 @@ export class Character {
     this.alloc = new Set([this.startId]); this.recalc(); return true;
   }
 
+  // ---------- zadania dzienne ----------
+  /** sprawdza, czy zaczął się nowy dzień */
+  checkDay(): void { if (refreshDaily(this.daily)) this.save(); }
+  track(kind: Track, n = 1): void {
+    for (const q of this.daily.quests) {
+      const d = QUESTS.find((x) => x.id === q.id);
+      if (!d || d.track !== kind || q.claimed) continue;
+      q.prog = Math.min(d.goal, kind === 'floors' ? Math.max(q.prog, n) : q.prog + n);
+    }
+  }
+  dailyReady(): number {
+    return this.daily.quests.filter((q) => !q.claimed && q.prog >= (QUESTS.find((x) => x.id === q.id)?.goal ?? 1e9)).length + (this.daily.loginClaimed ? 0 : 1);
+  }
+  claimQuest(i: number): string | null {
+    const q = this.daily.quests[i], d = q && QUESTS.find((x) => x.id === q.id);
+    if (!q || !d || q.claimed || q.prog < d.goal) return null;
+    q.claimed = true; this.gold += d.gold;
+    const lv = this.gainXp(Math.round(xpNeed(this.level) * d.xp));
+    let t = `+${d.gold} zł, +${Math.round(d.xp * 100)}% XP poziomu${lv ? ` (poziom ${this.level}!)` : ''}`;
+    if (d.gem) { const id = pickGem(this.skills, this.level); this.addSkillGem(id); t += `, gem: ${SKILLS[id].name}`; }
+    this.save(); return t;
+  }
+  claimLogin(): string | null {
+    if (this.daily.loginClaimed) return null;
+    const r = LOGIN_REWARDS[(this.daily.streak - 1) % 7];
+    this.daily.loginClaimed = true; this.gold += r.gold;
+    let t = `+${r.gold} zł`;
+    if (r.gem) { const id = pickGem(this.skills, this.level); this.addSkillGem(id); t += `, gem: ${SKILLS[id].name}`; }
+    if (r.support) { const id = SUPPORT_IDS[Math.floor(Math.random() * SUPPORT_IDS.length)]; this.addSupportGem(id); t += `, support: ${SUPPORTS[id].name}`; }
+    if (r.item) { const it = makeItem(2 + Math.floor(this.alloc.size / 25), 2); const res = this.addItemAuto(it); t += `, ${it.name} (${res === 'equipped' ? 'założony' : res === 'bag' ? 'w plecaku' : 'sprzedany'})`; }
+    this.save(); return t;
+  }
+
   // ---------- gemy ----------
   /** 'new' | 'up' | 'max' */
   addSkillGem(id: SkillId): 'new' | 'up' | 'max' {
     if (this.skills[id] === 0) {
       this.skills[id] = 1;
+      this.totals.disc = SKILL_IDS.filter((x) => this.skills[x] > 0).length;
       const main = SKILLS[id].kind === 'attack', slot = this.loadout.find((l, i) => !l.skill && (i < MAIN_SLOTS) === main);
       if (slot) slot.skill = id;
       return 'new';
@@ -201,7 +238,7 @@ export class Character {
   save(): void {
     try {
       localStorage.setItem(KEY, JSON.stringify({
-        v: VERSION, treeV: TREE_VERSION, pointsTotal: this.pointsTotal, totals: this.totals, done: this.done, bosses: this.bosses, cls: this.cls, points: this.points, gold: this.gold, runs: this.runs, wins: this.wins, level: this.level, xp: this.xp,
+        v: VERSION, treeV: TREE_VERSION, pointsTotal: this.pointsTotal, totals: this.totals, done: this.done, bosses: this.bosses, daily: this.daily, cls: this.cls, points: this.points, gold: this.gold, runs: this.runs, wins: this.wins, level: this.level, xp: this.xp,
         alloc: [...this.alloc], skills: this.skills, supportBag: this.supportBag, loadout: this.loadout, equipped: this.equipped, bag: this.bag,
       }));
     } catch { /* brak dostępu do storage */ }
@@ -215,10 +252,11 @@ export class Character {
       const c = new Character(d.cls);
       c.points = d.points; c.gold = d.gold; c.runs = d.runs ?? 0; c.wins = d.wins ?? 0; c.level = d.level ?? 1; c.xp = d.xp ?? 0;
       c.pointsTotal = d.pointsTotal ?? d.points + (d.alloc?.length ?? 0);
-      c.totals = { ...NO_TOTALS, ...(d.totals ?? {}) }; c.done = d.done ?? {}; c.bosses = d.bosses ?? {};
+      c.totals = { ...NO_TOTALS, ...(d.totals ?? {}) }; c.done = d.done ?? {}; c.bosses = d.bosses ?? {}; c.daily = { ...newDaily(), ...(d.daily ?? {}) };
       if (d.treeV !== TREE_VERSION) { c.points = c.pointsTotal; c.alloc = new Set([c.startId]); } // nowy układ drzewka: zwrot punktów
       else c.alloc = new Set<string>([c.startId, ...(d.alloc as string[]).filter((id) => NODES[id])]);
       Object.assign(c.skills, d.skills);
+      c.totals.disc = SKILL_IDS.filter((x) => c.skills[x] > 0).length;
       c.supportBag = (d.supportBag as SupportId[]).filter((s) => SUPPORT_IDS.includes(s));
       c.loadout = newLoadout().map((blank, i) => ({ skill: d.loadout?.[i]?.skill ?? null, sup: blank.sup.map((_, j) => d.loadout?.[i]?.sup?.[j] ?? null) }));
       c.equipped = d.equipped ?? {}; c.bag = d.bag ?? [];

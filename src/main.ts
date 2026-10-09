@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { MenuScene, ClassScene } from './menu';
 import { GameScene } from './game';
-import { TreeScene, InvScene, SkillsScene, ShopScene, AchScene } from './ui';
+import { TreeScene, InvScene, SkillsScene, ShopScene, AchScene, DailyScene } from './ui';
 import { H, S, W, makeTextures, patchText } from './gfx';
 import { makeItem } from './items';
 import * as tree from './tree';
@@ -22,6 +22,6 @@ const game = new Phaser.Game({
   backgroundColor: '#0a0814',
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: W * S, height: H * S },
   input: { activePointers: 2 },
-  scene: [BootScene, MenuScene, ClassScene, GameScene, TreeScene, InvScene, SkillsScene, ShopScene, AchScene],
+  scene: [BootScene, MenuScene, ClassScene, GameScene, TreeScene, InvScene, SkillsScene, ShopScene, AchScene, DailyScene],
 });
 Object.assign(window, { __phaser: game, __mk: makeItem, __tree: tree }); // do testów

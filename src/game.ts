@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import { BOSS_POINTS, BossDef, MAX_TIER, bossFor, tierDmg, tierHp, tierReward, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
-import { countOf, skillBase } from './skills';
+import { BOSS_POINTS, BossDef, MAX_TIER, bossFor, tierDmg, tierHp, tierReward, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
+import { countOf, pickGem, skillBase } from './skills';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
 import { H, S, W, setupCam, spr } from './gfx';
@@ -30,6 +30,7 @@ interface SkillState {
 }
 
 const WAKE_STEPS = 8;
+const swarmScale = (kind: string, id: string): number => (id === 'm_golem' ? 1.5 : kind === 'swarm' ? 0.6 : kind === 'turret' ? 1.15 : kind === 'bomber' ? 0.9 : 1);
 
 export class GameScene extends Phaser.Scene {
   private char!: Character;
@@ -44,7 +45,9 @@ export class GameScene extends Phaser.Scene {
   private bossDef: BossDef | null = null; private unlocked: string[] = [];
   private enemies: Enemy[] = []; private shots: Shot[] = []; private zones: Zone[] = []; private drops: Drop[] = [];
   private states: SkillState[] = [];
-  private fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
+  private fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0, critT: 0, critV: 0, magnetT: 0 };
+  private traps: { x: number; y: number; R: number; arm: number; life: number; dmg: number; m: Mods; color: number; obj: Phaser.GameObjects.Arc }[] = [];
+  private totems: { x: number; y: number; life: number; fire: number; every: number; dmg: number; range: number; m: Mods; color: number; obj: Phaser.GameObjects.Image }[] = [];
   private over = false; private popCount = 0; private fxCount = 0; private found = 0;
   private map!: GameMap;
   private mapView: MapView | null = null;
@@ -80,7 +83,8 @@ export class GameScene extends Phaser.Scene {
     this.xpGained = 0; this.startLevel = this.char.level; this.bossDef = null; this.unlocked = [];
     this.enemies = []; this.shots = []; this.zones = []; this.drops = []; this.states = []; this.icons = [];
     this.packs = []; this.eshots = []; this.teles = []; this.flowKey = -1; this.flowT = 0; this.mmDirty = false; this.mmT = 0;
-    this.fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
+    this.fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0, critT: 0, critV: 0, magnetT: 0 };
+    this.traps = []; this.totems = [];
     this.over = false; this.popCount = 0; this.fxCount = 0; this.found = 0; this.stickOrigin = null; this.quitArmed = false;
   }
 
@@ -119,7 +123,7 @@ export class GameScene extends Phaser.Scene {
     this.add.rectangle(284, 50, 68, 68, 0x000000, 0.45).setOrigin(0).setScrollFactor(0).setDepth(98).setStrokeStyle(1, 0xffffff, 0.35);
     this.loadLevel();
     this.icons = this.states.map((s, i) => spr(this, W / 2 + (i - (this.states.length - 1) / 2) * 50, H - 30, `ic_${s.id}`).setScale(40 / 44 / S).setScrollFactor(0).setDepth(100));
-    Object.assign(window, { __game: this, __mk: makeItem }); // do testów
+    Object.assign(window, { __game: this, __mk: makeItem, __skills: SKILLS }); // do testów
   }
 
   /** buduje (lub przebudowuje) piętro: mapa, wrogowie, minimapa */
@@ -128,6 +132,9 @@ export class GameScene extends Phaser.Scene {
     for (const sh of this.shots) sh.obj.destroy();
     for (const sh of this.eshots) sh.obj.destroy();
     for (const z of this.zones) z.obj.destroy();
+    for (const t of this.traps) t.obj.destroy();
+    for (const t of this.totems) t.obj.destroy();
+    this.traps = []; this.totems = [];
     for (const d of this.drops) { d.obj.destroy(); d.beam?.destroy(); }
     this.enemies = []; this.shots = []; this.eshots = []; this.zones = []; this.drops = []; this.packs = []; this.teles = [];
     this.floorKills = 0; this.portal = null; this.portalOpen = false; this.flowKey = -1;
@@ -159,6 +166,7 @@ export class GameScene extends Phaser.Scene {
     this.busy = true;
     this.floor++;
     this.char.totals.maxFloor = Math.max(this.char.totals.maxFloor, this.floor);
+    this.char.track('floors', this.floor);
     this.checkAch(); this.char.save();
     const cam = this.cameras.main;
     cam.fadeOut(260, 10, 8, 20);
@@ -178,7 +186,8 @@ export class GameScene extends Phaser.Scene {
     const add = (k: StatKey, v: number) => { b[k] += v; };
     for (const s of this.states) {
       if (s.kind !== 'aura') continue;
-      const k = this.strength(s.m), sb = skillBase(s.id, s.lv);
+      const k = this.strength(s.m), sb = skillBase(s.id, s.lv), sd = SKILLS[s.id];
+      if (sd.stats) { sd.stats.forEach(([key, field, scale]) => add(key, sb[field] * scale * k)); continue; }
       switch (s.id) {
         case 'a_fury': add('dmg', (sb.a / 100) * k); break;
         case 'a_haste': add('cdr', (sb.a / 100) * k); add('speed', (sb.b / 100) * k); break;
@@ -189,6 +198,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.fx.frenzyT > 0) { b.dmg += this.fx.frenzyDmg; b.speed += this.fx.frenzySpd; }
     if (this.fx.hasteT > 0) b.cdr += this.fx.hasteCdr;
+    if (this.fx.critT > 0) b.crit += this.fx.critV;
     b.cdr = Math.min(0.75, b.cdr); b.crit = Math.min(0.9, b.crit);
     this.st = b;
   }
@@ -199,7 +209,13 @@ export class GameScene extends Phaser.Scene {
       const s: SkillState = { id, kind, lv: this.char.skills[id], m, cd: kind === 'buff' ? 1.5 : 0, cdMax: 1, orbs: [], angle: 0, minions: [] };
       if (kind === 'minion') {
         const n = countOf(id, skillBase(id, s.lv), Math.round(this.char.stats.proj) + m.proj, m);
-        for (let i = 0; i < n; i++) s.minions.push({ obj: spr(this, 0, 0, id === 'm_eye' ? 'mn_eye' : 'mn_servant').setDepth(9), cd: 0.5 + i * 0.3, hitCd: 0 });
+        const md = SKILLS[id], eye = id === 'm_eye' || md.mn === 'shoot' || md.mn === 'turret' || md.mn === 'heal';
+        const cnt = md.mn === 'heal' ? 1 : n;
+        for (let i = 0; i < cnt; i++) {
+          const o = spr(this, this.player.x, this.player.y, eye ? 'mn_eye' : 'mn_servant').setDepth(9);
+          if (id !== 'm_eye' && id !== 'm_servant') o.setTint(md.color);
+          s.minions.push({ obj: o, cd: 0.5 + i * 0.3, hitCd: 0 });
+        }
       }
       return s;
     });
@@ -220,6 +236,7 @@ export class GameScene extends Phaser.Scene {
     this.states.forEach((s) => (s.kind === 'attack' ? this.cast(s, dt) : s.kind === 'buff' ? this.castBuff(s, dt) : s.kind === 'minion' ? this.minions(s, dt) : undefined));
     this.updateShots(dt);
     this.updateZones(dt);
+    this.updateDevices(dt);
     this.updateEnemies(dt);
     this.updateEShots(dt);
     this.updateTeles(dt);
@@ -250,6 +267,8 @@ export class GameScene extends Phaser.Scene {
     let dirty = false;
     if (f.frenzyT > 0) { f.frenzyT -= dt; if (f.frenzyT <= 0) dirty = true; }
     if (f.hasteT > 0) { f.hasteT -= dt; if (f.hasteT <= 0) dirty = true; }
+    if (f.critT > 0) { f.critT -= dt; if (f.critT <= 0) dirty = true; }
+    if (f.magnetT > 0) f.magnetT -= dt;
     if (f.shieldT > 0) { f.shieldT -= dt; if (f.shieldT <= 0) f.shield = 0; }
     if (dirty) this.refreshStats();
   }
@@ -476,7 +495,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- ataki ----------
   private cast(s: SkillState, dt: number): void {
-    if (s.id === 'orbs') return this.orbs(s, dt);
+    if (s.id === 'orbs' || SKILLS[s.id].arch === 'orbit') return this.orbs(s, dt);
     s.cd -= dt;
     if (s.cd > 0) return;
     if (this.fire(s, 1, false) && s.m.echo > 0) this.time.delayedCall(450, () => { if (!this.over) this.fire(s, 0.7, true); });
@@ -630,7 +649,241 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: g, alpha: 0, duration: 220, onComplete: () => g.destroy() });
         return true;
       }
+      default: return this.fireGen(s, dmgS, echo);
+    }
+  }
+
+  /** sumuje modyfikatory z gemu (ogień, mróz itd.) z supportami */
+  private withFx(m: Mods, fx?: Partial<Mods>): Mods {
+    if (!fx) return m;
+    const r = { ...m };
+    (Object.keys(fx) as (keyof Mods)[]).forEach((k) => { if (k === 'dmg' || k === 'cd' || k === 'area') r[k] *= fx[k] as number; else r[k] += fx[k] as number; });
+    return r;
+  }
+
+  /** wspólny silnik archetypów ataków (nowe gemy) */
+  private fireGen(s: SkillState, dmgS: number, echo: boolean): boolean {
+    const def = SKILLS[s.id], ar = def.arch;
+    if (!ar) return false;
+    const { lv } = s, st = this.st, P = this.player, b = skillBase(s.id, lv), e = def.e ?? {}, m = this.withFx(s.m, def.fx);
+    const area = (1 + st.area) * m.area, extra = Math.round(st.proj) + m.proj, cdm = (1 - st.cdr) * m.cd, col = def.color;
+    const setCd = () => { if (!echo) { s.cd = Math.max(0.25, b.cd * cdm); s.cdMax = s.cd; } };
+    const n = countOf(s.id, b, extra, m), dmg = b.dmg * dmgS, pc = 1 + b.pierce + m.pierce;
+    const tint = (sh: Shot, sz = 1): Shot => { sh.obj.setTint(col).setScale(((e.sz ?? 1) * sz) / S); return sh; };
+    const ring = (x: number, y: number, R: number, a = 0.18) => {
+      const r = this.add.circle(x, y, R, col, a).setStrokeStyle(2, col).setDepth(9);
+      this.tweens.add({ targets: r, alpha: 0, scale: 1.25, duration: 300, onComplete: () => r.destroy() });
+    };
+    const near = (d: number) => this.nearestTo(P.x, P.y, d);
+    const pool = (d: number) => this.enemies.filter((x) => !x.dead && this.dist(P, x.obj) < d);
+    switch (ar) {
+      case 'proj': {
+        const t = near((e.spd ?? 300) * (e.life ?? 1.3) + 30);
+        if (!t) return false;
+        setCd();
+        const ang = Math.atan2(t.obj.y - P.y, t.obj.x - P.x);
+        for (let i = 0; i < n; i++) tint(this.shot(P.x, P.y, e.tex ?? 'bolt', ang + (i - (n - 1) / 2) * 0.14, e.spd ?? 300, e.life ?? 1.3, pc, dmg, m));
+        return true;
+      }
+      case 'cone': {
+        const t = near(230);
+        if (!t) return false;
+        setCd();
+        const ang = Math.atan2(t.obj.y - P.y, t.obj.x - P.x), sp = e.spread ?? 0.7;
+        for (let i = 0; i < n; i++) tint(this.shot(P.x, P.y, e.tex ?? 'bolt', ang + (n > 1 ? (i / (n - 1) - 0.5) * sp : 0) + (Math.random() - 0.5) * 0.08, (e.spd ?? 320) * (0.9 + Math.random() * 0.2), e.life ?? 0.45, pc, dmg, m));
+        return true;
+      }
+      case 'beam': {
+        const t = near(e.len ?? 360);
+        if (!t) return false;
+        setCd();
+        const base = Math.atan2(t.obj.y - P.y, t.obj.x - P.x), w = (e.w ?? 16) * area, len = e.len ?? 360;
+        const g = this.add.graphics().setDepth(11);
+        for (let i = 0; i < n; i++) {
+          const a = base + (i - (n - 1) / 2) * 0.28, ux = Math.cos(a), uy = Math.sin(a);
+          let L = 0; while (L < len && !this.solidAt(P.x + ux * L, P.y + uy * L)) L += 8;
+          for (const x of this.enemies.slice()) {
+            if (x.dead) continue;
+            const rx = x.obj.x - P.x, ry = x.obj.y - P.y, along = rx * ux + ry * uy;
+            if (along < 0 || along > L + x.r) continue;
+            if (Math.abs(rx * uy - ry * ux) < w / 2 + x.r) this.hurt(x, dmg, m);
+          }
+          g.lineStyle(w, col, 0.35).lineBetween(P.x, P.y, P.x + ux * L, P.y + uy * L).lineStyle(Math.max(2, w * 0.35), 0xffffff, 0.85).lineBetween(P.x, P.y, P.x + ux * L, P.y + uy * L);
+        }
+        this.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: () => g.destroy() });
+        return true;
+      }
+      case 'nova': {
+        if (!near(b.range * area + 40)) return false;
+        setCd();
+        const R = b.range * area;
+        for (const x of this.enemies.slice()) if (!x.dead && this.dist(P, x.obj) < R + x.r) this.hurt(x, dmg, m);
+        const r = this.add.circle(P.x, P.y, R, col, 0.2).setStrokeStyle(3, col).setDepth(9).setScale(0.1);
+        this.tweens.add({ targets: r, scale: 1, alpha: 0, duration: 350, onComplete: () => r.destroy() });
+        return true;
+      }
+      case 'blast': {
+        const pl = pool(340);
+        if (!pl.length) return false;
+        setCd();
+        const R = b.range * area;
+        Phaser.Utils.Array.Shuffle(pl).slice(0, n).forEach((x) => {
+          const bx = x.obj.x, by = x.obj.y;
+          const mark = this.add.circle(bx, by, R, col, 0.14).setStrokeStyle(2, col).setDepth(2);
+          this.time.delayedCall((e.delay ?? 0.6) * 1000, () => { mark.destroy(); if (!this.over) this.blast(bx, by, R, dmg, m, col); });
+        });
+        return true;
+      }
+      case 'zone': {
+        const pl = pool(340);
+        if (!pl.length) return false;
+        setCd();
+        const R = b.range * area;
+        for (let i = 0; i < n; i++) {
+          const x = Phaser.Utils.Array.GetRandom(pl);
+          const obj = this.add.circle(x.obj.x, x.obj.y, R, col, 0.2).setStrokeStyle(3, col, 0.9).setDepth(2);
+          this.tweens.add({ targets: obj, scale: 1.08, yoyo: true, repeat: -1, duration: 400 });
+          this.zones.push({ obj, x: x.obj.x, y: x.obj.y, R, life: b.dur, tick: 0.1, tickEvery: b.a || 0.5, dmg, m });
+        }
+        return true;
+      }
+      case 'chain': {
+        const first = near(290);
+        if (!first) return false;
+        setCd();
+        const hit = new Set<Enemy>(), g = this.add.graphics().setDepth(11);
+        g.lineStyle(3, col);
+        let cur: Enemy | null = first, px = P.x, py = P.y;
+        for (let i = 0; i < n && cur; i++) {
+          g.lineBetween(px, py, cur.obj.x, cur.obj.y);
+          hit.add(cur); px = cur.obj.x; py = cur.obj.y;
+          this.hurt(cur, dmg, m);
+          cur = this.nearestTo(px, py, 150, hit);
+        }
+        this.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: () => g.destroy() });
+        return true;
+      }
+      case 'arc': {
+        const R = b.range * area, t = near(R + 30);
+        if (!t) return false;
+        setCd();
+        const base = Math.atan2(t.obj.y - P.y, t.obj.x - P.x), full = (e.arc ?? 2) >= 6, half = (e.arc ?? 2) / 2;
+        for (let i = 0; i < n; i++) {
+          const a = base + (i - (n - 1) / 2) * (full ? 0 : Math.max(0.6, half));
+          for (const x of this.enemies.slice()) {
+            if (x.dead || this.dist(P, x.obj) > R + x.r) continue;
+            if (!full && Math.abs(Phaser.Math.Angle.Wrap(Math.atan2(x.obj.y - P.y, x.obj.x - P.x) - a)) > half) continue;
+            this.hurt(x, dmg, m);
+          }
+          const sl = this.add.graphics().setDepth(9);
+          sl.fillStyle(col, 0.4);
+          if (full) sl.fillCircle(P.x, P.y, R); else sl.slice(P.x, P.y, R, a - half, a + half).fillPath();
+          this.tweens.add({ targets: sl, alpha: 0, duration: 170, onComplete: () => sl.destroy() });
+        }
+        return true;
+      }
+      case 'boom': {
+        const t = near(320);
+        if (!t) return false;
+        setCd();
+        const ang = Math.atan2(t.obj.y - P.y, t.obj.x - P.x);
+        for (let i = 0; i < n; i++) tint(this.shot(P.x, P.y, 'scythe', ang + (i - (n - 1) / 2) * 0.6, 300, 6, 999, dmg, m, 'boom', b.range * area));
+        return true;
+      }
+      case 'home': {
+        if (!near(420)) return false;
+        setCd();
+        for (let i = 0; i < n; i++) tint(this.shot(P.x, P.y, 'wisp', Math.random() * Math.PI * 2, e.spd ?? 240, 2.6, pc, dmg, m, 'home'));
+        return true;
+      }
+      case 'trap': {
+        if (!near(300)) return false;
+        setCd();
+        const R = b.range * area;
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * 6.28, x = P.x + Math.cos(a) * (24 + Math.random() * 40), y = P.y + Math.sin(a) * (24 + Math.random() * 40);
+          const [tx, ty] = this.solidAt(x, y) ? [P.x, P.y] : [x, y];
+          const obj = this.add.circle(tx, ty, Math.min(R, 22), col, 0.35).setStrokeStyle(2, col).setDepth(2);
+          this.traps.push({ x: tx, y: ty, R, arm: e.delay ?? 0.4, life: e.life ?? 14, dmg, m, color: col, obj });
+          if (this.traps.length > 8) { const o = this.traps.shift(); o?.obj.destroy(); }
+        }
+        return true;
+      }
+      case 'line': {
+        const t = near(330);
+        if (!t) return false;
+        setCd();
+        const ang = Math.atan2(t.obj.y - P.y, t.obj.x - P.x), R = b.range * area, step = (e.w ?? 36) * Math.max(1, area * 0.8);
+        for (let i = 0; i < n; i++) {
+          const x = P.x + Math.cos(ang) * (34 + i * step), y = P.y + Math.sin(ang) * (34 + i * step);
+          if (this.solidAt(x, y)) break;
+          const mark = this.add.circle(x, y, R, col, 0.12).setStrokeStyle(2, col).setDepth(2);
+          this.time.delayedCall((e.delay ?? 0.1) * 1000 * (i + 1) + 250, () => { mark.destroy(); if (!this.over) this.blast(x, y, R, dmg, m, col); });
+        }
+        return true;
+      }
+      case 'ring': {
+        if (!near(280)) return false;
+        setCd();
+        const off = Math.random() * 6.28;
+        for (let i = 0; i < n; i++) tint(this.shot(P.x, P.y, e.tex ?? 'bolt', off + (i / n) * 6.28, e.spd ?? 240, e.life ?? 1, pc, dmg, m));
+        ring(P.x, P.y, 24, 0.12);
+        return true;
+      }
+      case 'totem': {
+        if (!near(300)) return false;
+        setCd();
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * 6.28, x = P.x + Math.cos(a) * 34, y = P.y + Math.sin(a) * 34;
+          const [tx, ty] = this.solidAt(x, y) ? [P.x, P.y] : [x, y];
+          const obj = spr(this, tx, ty, `e_totem_${this.map.biome.id}`).setScale(0.6 / S * S / 1).setTint(col).setDepth(6);
+          obj.setScale(0.6 / S);
+          this.totems.push({ x: tx, y: ty, life: b.dur, fire: 0.3, every: Math.max(0.3, b.a * cdm), dmg, range: b.range * area, m, color: col, obj });
+          if (this.totems.length > 4) { const o = this.totems.shift(); o?.obj.destroy(); }
+        }
+        return true;
+      }
       default: return false;
+    }
+  }
+
+  /** pułapki, totemy i aury obszarowe */
+  private updateDevices(dt: number): void {
+    this.traps = this.traps.filter((t) => {
+      t.arm -= dt; t.life -= dt;
+      let go = false;
+      if (t.arm <= 0) for (const e of this.enemies) if (!e.dead && Phaser.Math.Distance.Between(t.x, t.y, e.obj.x, e.obj.y) < t.R * 0.6 + e.r) { go = true; break; }
+      if (go) { this.blast(t.x, t.y, t.R, t.dmg, t.m, t.color); t.obj.destroy(); return false; }
+      if (t.life <= 0) { t.obj.destroy(); return false; }
+      t.obj.setAlpha(t.arm > 0 ? 0.25 : 0.55 + 0.2 * Math.sin(this.time_ * 6));
+      return true;
+    });
+    this.totems = this.totems.filter((t) => {
+      t.life -= dt; t.fire -= dt;
+      if (t.fire <= 0) {
+        const x = this.nearestTo(t.x, t.y, t.range);
+        if (x) { t.fire = t.every; const sh = this.shot(t.x, t.y - 8, 'bolt', Math.atan2(x.obj.y - t.y, x.obj.x - t.x), 340, 1, 1, t.dmg, t.m); sh.obj.setTint(t.color); } else t.fire = 0.2;
+      }
+      if (t.life <= 0) { t.obj.destroy(); return false; }
+      return true;
+    });
+    // aury obszarowe
+    for (const s of this.states) {
+      const d = SKILLS[s.id];
+      if (s.kind !== 'aura' || !d.act) continue;
+      s.cd -= dt;
+      if (s.cd > 0) continue;
+      s.cd = d.act.tick;
+      const b = skillBase(s.id, s.lv), R = d.act.R * (1 + this.st.area) * s.m.area;
+      for (const e of this.enemies.slice()) {
+        if (e.dead || this.dist(this.player, e.obj) > R + e.r) continue;
+        if (d.act.t === 'slow') e.slowT = Math.max(e.slowT, 0.6); else this.hurt(e, b.dmg, d.act.t === 'burn' ? { ...s.m, burn: s.m.burn + 0.3 } : s.m);
+      }
+    }
+    if (this.fx.magnetT > 0) for (const dr of this.drops) {
+      const a = Math.atan2(this.player.y - dr.obj.y, this.player.x - dr.obj.x);
+      dr.obj.x += Math.cos(a) * 520 * dt; dr.obj.y += Math.sin(a) * 520 * dt;
+      if (dr.beam) { dr.beam.x = dr.obj.x; dr.beam.y = dr.obj.y - 30; }
     }
   }
 
@@ -641,9 +894,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private orbs(s: SkillState, dt: number): void {
-  const { lv, m } = s, st = this.st, b = skillBase('orbs', lv);
-    const area = (1 + st.area) * m.area, want = countOf('orbs', b, Math.round(st.proj) + m.proj, m);
-    while (s.orbs.length < want) s.orbs.push(spr(this, 0, 0, 'orb').setDepth(9));
+    const { lv } = s, st = this.st, def = SKILLS[s.id], m = this.withFx(s.m, def.fx), b = skillBase(s.id, lv);
+    const area = (1 + st.area) * m.area, want = countOf(s.id, b, Math.round(st.proj) + m.proj, m);
+    while (s.orbs.length < want) { const o = spr(this, 0, 0, 'orb').setDepth(9); if (s.id !== 'orbs') o.setTint(def.color); s.orbs.push(o); }
     s.angle += (dt * b.a) / Math.max(0.5, (1 - st.cdr) * m.cd);
     const R = b.range * area;
     s.orbs.forEach((o, i) => {
@@ -661,7 +914,9 @@ export class GameScene extends Phaser.Scene {
     s.cd -= dt;
     if (s.cd > 0) return;
     const { lv, m } = s, k = this.strength(m), P = this.player, cdm = (1 - this.st.cdr) * m.cd, b = skillBase(s.id, lv);
-    if (!this.nearestTo(P.x, P.y, 300)) return;
+    const bd = SKILLS[s.id].buff;
+    if (bd === 'lifeline' && this.hp > this.char.maxHp * 0.85) return;
+    if (bd !== 'magnet' && bd !== 'lifeline' && !this.nearestTo(P.x, P.y, 300)) return;
     const f = this.fx;
     const ring = (color: number, R: number) => {
       const r = this.add.circle(P.x, P.y, R, color, 0.2).setStrokeStyle(3, color).setDepth(9);
@@ -680,35 +935,91 @@ export class GameScene extends Phaser.Scene {
       case 'ward': f.shield = this.char.maxHp * (b.a / 100) * k; f.shieldT = b.dur; ring(SKILLS.ward.color, 50); break;
       default: break;
     }
+    if (bd) {
+      const col = SKILLS[s.id].color;
+      switch (bd) {
+        case 'crit': f.critT = b.dur; f.critV = (b.a / 100) * k; ring(col, 50); this.refreshStats(); break;
+        case 'freeze': {
+          const R = b.range * (1 + this.st.area) * m.area;
+          for (const e of this.enemies) if (!e.dead && this.dist(P, e.obj) < R + e.r) e.frozenT = Math.max(e.frozenT, b.dur * k);
+          ring(col, R); break;
+        }
+        case 'phase': this.invuln = Math.max(this.invuln, b.dur * k); ring(col, 40); break;
+        case 'lifeline': this.heal(Math.round(this.char.maxHp * (b.a / 100) * k)); ring(col, 50); break;
+        case 'blink': {
+          const t = this.nearestTo(P.x, P.y, 400);
+          const a = t ? Math.atan2(P.y - t.obj.y, P.x - t.obj.x) : Math.random() * 6.28;
+          for (let d = 110; d >= 30; d -= 20) {
+            const nx = P.x + Math.cos(a) * d, ny = P.y + Math.sin(a) * d;
+            if (this.canStand(nx, ny, 8)) { ring(col, 30); P.x = nx; P.y = ny; ring(col, 30); break; }
+          }
+          this.invuln = Math.max(this.invuln, b.dur); break;
+        }
+        case 'magnet': f.magnetT = 1.4; ring(col, 60); break;
+        default: break;
+      }
+    }
     s.cdMax = Math.max(1, s.cd);
   }
 
   // ---------- słudzy ----------
   private minions(s: SkillState, dt: number): void {
-    const { lv, m } = s, P = this.player, cdm = (1 - this.st.cdr) * m.cd, n = s.minions.length, b = skillBase(s.id, lv);
+    const { lv } = s, P = this.player, def = SKILLS[s.id], m = this.withFx(s.m, def.fx), cdm = (1 - this.st.cdr) * m.cd, n = s.minions.length, b = skillBase(s.id, lv);
+    const kind = def.mn ?? (s.id === 'm_eye' ? 'shoot' : 'melee'), area = (1 + this.st.area) * m.area;
     s.angle += dt * 1.4;
     s.minions.forEach((mn, i) => {
       const o = mn.obj;
       mn.hitCd -= dt;
-      if (s.id === 'm_eye') {
-        const a = s.angle + (i / n) * Math.PI * 2;
-        const tx = P.x + Math.cos(a) * 46, ty = P.y + Math.sin(a) * 46 - 8;
+      const orbitAt = (rad: number, spin: number) => {
+        const a = (spin ? s.angle : 0) + (i / n) * Math.PI * 2;
+        const tx = P.x + Math.cos(a) * rad, ty = P.y + Math.sin(a) * rad - 8;
         o.x += (tx - o.x) * Math.min(1, 7 * dt); o.y += (ty - o.y) * Math.min(1, 7 * dt);
+      };
+      if (kind === 'shoot' || kind === 'turret') {
+        orbitAt(kind === 'turret' ? 34 : 46, kind === 'shoot' ? 1 : 0);
         mn.cd -= dt;
         if (mn.cd <= 0) {
-          const t = this.nearestTo(o.x, o.y, 300);
-          if (t) { mn.cd = b.cd * cdm; this.shot(o.x, o.y, 'wisp', Math.atan2(t.obj.y - o.y, t.obj.x - o.x), 300, 1.2, 1 + m.pierce, b.dmg, m); }
-          else mn.cd = 0.3;
+          const t = this.nearestTo(o.x, o.y, kind === 'turret' ? 340 : 300);
+          if (t) {
+            mn.cd = b.cd * cdm;
+            const sh = this.shot(o.x, o.y, kind === 'turret' ? 'bolt' : 'wisp', Math.atan2(t.obj.y - o.y, t.obj.x - o.x), kind === 'turret' ? 360 : 300, 1.2, 1 + m.pierce, b.dmg, m);
+            if (s.id !== 'm_eye') sh.obj.setTint(def.color);
+          } else mn.cd = 0.3;
         }
+      } else if (kind === 'heal') {
+        orbitAt(30, 1);
+        mn.cd -= dt;
+        if (mn.cd <= 0) {
+          mn.cd = Math.max(0.5, b.cd * cdm);
+          if (this.hp < this.char.maxHp) {
+            this.heal(Math.round(this.char.maxHp * (b.a / 100) * this.strength(m)));
+            const r = this.add.circle(P.x, P.y, 20, def.color, 0.25).setStrokeStyle(2, def.color).setDepth(9);
+            this.tweens.add({ targets: r, alpha: 0, scale: 2, duration: 400, onComplete: () => r.destroy() });
+          }
+        }
+      } else if (kind === 'bomber') {
+        if (mn.cd > 0) { mn.cd -= dt; o.setVisible(false); o.x = P.x; o.y = P.y; return; }
+        o.setVisible(true);
+        const t = this.nearestTo(o.x, o.y, 320);
+        const tx = t ? t.obj.x : P.x + Math.cos(s.angle + i) * 36, ty = t ? t.obj.y : P.y + Math.sin(s.angle + i) * 36;
+        const a = Math.atan2(ty - o.y, tx - o.x), d = Phaser.Math.Distance.Between(o.x, o.y, tx, ty);
+        if (d > 4) { o.x += Math.cos(a) * 200 * dt; o.y += Math.sin(a) * 200 * dt; }
+        if (t && d < t.r + 12) { this.blast(o.x, o.y, b.range * area, b.dmg, m, def.color); mn.cd = Math.max(0.8, b.cd * cdm * 2); }
       } else {
+        // melee / swarm
+        const swarm = kind === 'swarm', golem = s.id === 'm_golem';
         const t = this.nearestTo(o.x, o.y, 280);
-        let tx = P.x + Math.cos(s.angle + (i / n) * Math.PI * 2) * 40, ty = P.y + Math.sin(s.angle + (i / n) * Math.PI * 2) * 40, sp = 140;
-        if (t) { tx = t.obj.x; ty = t.obj.y; sp = 150 + 8 * lv; }
+        let tx = P.x + Math.cos(s.angle + (i / n) * Math.PI * 2) * 40, ty = P.y + Math.sin(s.angle + (i / n) * Math.PI * 2) * 40, sp = swarm ? 190 : golem ? 105 : 140;
+        if (t) { tx = t.obj.x; ty = t.obj.y; sp = (swarm ? 230 : golem ? 120 : 150) + 8 * lv; }
         const a = Math.atan2(ty - o.y, tx - o.x), d = Phaser.Math.Distance.Between(o.x, o.y, tx, ty);
         if (d > 6) { o.x += Math.cos(a) * sp * dt; o.y += Math.sin(a) * sp * dt; }
-        if (t && mn.hitCd <= 0 && d < t.r + 14) { mn.hitCd = b.cd * cdm; this.hurt(t, b.dmg, m); }
+        if (t && mn.hitCd <= 0 && d < t.r + (golem ? 26 : swarm ? 12 : 14)) {
+          mn.hitCd = b.cd * cdm; this.hurt(t, b.dmg, m);
+          if (golem) for (const x of this.enemies.slice()) if (!x.dead && x !== t && this.dist(o, x.obj) < x.r + 40) this.hurt(x, b.dmg * 0.6, m);
+        }
       }
-      o.setScale((1 + Math.sin(this.time_ * 6 + i) * 0.04) / S);
+      const base = swarmScale(kind, s.id);
+      o.setScale((base * (1 + Math.sin(this.time_ * 6 + i) * 0.04)) / S);
     });
   }
 
@@ -784,6 +1095,7 @@ export class GameScene extends Phaser.Scene {
     e.dead = true;
     if (e.sum) { e.obj.destroy(); this.enemies.splice(this.enemies.indexOf(e), 1); return; }
     this.kills++; this.floorKills++;
+    this.char.track('kills'); if (e.elite) this.char.track('elites'); if (e.boss) this.char.track('bosses');
     this.xpFly(e.obj.x, e.obj.y);
     this.xpGained += e.xp;
     this.char.totals.kills++;
@@ -821,8 +1133,8 @@ export class GameScene extends Phaser.Scene {
   // ---------- łup ----------
   private rollDrop(e: Enemy): void {
     const mult = (1 + this.st.drop) * tierReward(this.tier), ilvl = 1 + Math.floor(this.char.level * 0.8) + (this.mode.boss ? 2 : 0);
-    const gem = () => (Math.random() < 0.3
-      ? this.spawnDrop(e, undefined, Phaser.Utils.Array.GetRandom(SKILL_IDS))
+    const gem = () => (Math.random() < 0.45
+      ? this.spawnDrop(e, undefined, pickGem(this.char.skills, this.char.level))
       : this.spawnDrop(e, undefined, undefined, Phaser.Utils.Array.GetRandom(SUPPORT_IDS)));
     if (e.boss) {
       this.spawnDrop(e, makeItem(ilvl + 4, 3)); gem(); gem();
@@ -845,7 +1157,7 @@ export class GameScene extends Phaser.Scene {
     this.drops = this.drops.filter((d) => {
       if (this.dist(this.player, d.obj) > 22) return true;
       this.found++;
-      if (d.skill || d.support) this.char.totals.gems++;
+      if (d.skill || d.support) { this.char.totals.gems++; this.char.track('gems'); }
       if (d.item && d.item.rarity === 3) this.char.totals.legendary++;
       if (d.skill) {
         const r = this.char.addSkillGem(d.skill);
@@ -1124,6 +1436,7 @@ export class GameScene extends Phaser.Scene {
     const gold = md.free
       ? Math.floor((this.kills * 0.8 + 25 * (this.floor - 1)) * (1 + this.st.gold) * md.goldMul * tierReward(this.tier))
       : Math.floor((this.kills * 0.8) * (1 + this.st.gold) * md.goldMul * tierReward(this.tier) * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
+    c.track('runs'); if (win) c.track('wins');
     c.gold += gold; c.runs++; c.totals.runs++; if (win) { c.wins++; c.totals.wins++; if (md.boss) c.totals.longWins++; }
     if (this.tier === c.totals.maxTier && c.totals.maxTier < MAX_TIER && ((win && !md.free) || (md.free && this.floor >= 4))) {
       c.totals.maxTier++; this.unlocked.push(`Zagrożenie ${c.totals.maxTier} odblokowane`);

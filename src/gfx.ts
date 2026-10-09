@@ -62,6 +62,8 @@ const mix = (a: number, b: number, t: number): number => {
   return (f(16) << 16) | (f(8) << 8) | f(0);
 };
 
+const CORE_GLYPHS = new Set(['blade', 'orbs', 'bolt', 'nova', 'chain', 'meteor', 'tentacles', 'spikes', 'rift', 'lance', 'scythe', 'swarm', 'heal', 'frenzy', 'ward', 'haste', 'a_fury', 'a_haste', 'a_guard', 'a_sight', 'm_eye', 'm_servant']);
+
 const star = (cx: number, cy: number, ro: number, ri: number, n = 5, rot = -Math.PI / 2): number[][] =>
   Array.from({ length: n * 2 }, (_, i) => { const r = i % 2 ? ri : ro, a = rot + (i * Math.PI) / n; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
 
@@ -79,7 +81,68 @@ function classGlyph(p: Pen, id: ClassId, cx: number, cy: number): void {
   }
 }
 
+/** ikony nowych gemów z gotowych kształtów według archetypu */
+function genericGlyph(p: Pen, id: SkillId, cx: number, cy: number, c: number): void {
+  const d = SKILLS[id], r = (a: number) => [Math.cos(a), Math.sin(a)];
+  if (d.kind === 'attack') {
+    switch (d.arch) {
+      case 'proj': p.line(cx - 11, cy, cx + 5, cy, c, 4).poly([[cx + 12, cy], [cx + 3, cy - 7], [cx + 3, cy + 7]], c).circle(cx - 12, cy, 2.5, c); break;
+      case 'cone': [-0.5, 0, 0.5].forEach((a) => p.line(cx - 10, cy, cx - 10 + Math.cos(a) * 22, cy + Math.sin(a) * 22, c, 3)); break;
+      case 'beam': p.line(cx - 13, cy + 6, cx + 13, cy - 6, c, 7).line(cx - 13, cy + 6, cx + 13, cy - 6, 0xffffff, 2.5); break;
+      case 'nova': p.ring(cx, cy, 4, c, 3).ring(cx, cy, 9, c, 2.5).ring(cx, cy, 14, c, 2, 0.6); break;
+      case 'blast': p.circle(cx, cy + 5, 8, c).line(cx - 2, cy - 14, cx - 2, cy - 4, c, 3).poly([[cx - 2, cy - 2], [cx - 8, cy - 8], [cx + 4, cy - 8]], c); break;
+      case 'zone': p.ellipse(cx, cy, 28, 14, c, 0.5).ring(cx, cy, 8, c, 2.5).ellipse(cx, cy, 12, 5, c); break;
+      case 'chain': p.path([[cx - 12, cy - 8], [cx - 2, cy + 2], [cx + 3, cy - 6], [cx + 12, cy + 8]], c, 3.5).circle(cx - 12, cy - 8, 3, c).circle(cx + 12, cy + 8, 3, c); break;
+      case 'arc': p.arc(cx, cy + 4, 13, Math.PI * 1.15, Math.PI * 1.85, c, 5).line(cx - 10, cy - 6, cx - 4, cy - 2, c, 3); break;
+      case 'orbit': p.ring(cx, cy, 11, c, 1.6, 0.5); [0, 2.1, 4.2].forEach((a) => p.circle(cx + r(a)[0] * 11, cy + r(a)[1] * 11, 4, c)); break;
+      case 'boom': p.arc(cx, cy, 11, Math.PI * 0.2, Math.PI * 1.5, c, 4).poly([[cx - 13, cy - 4], [cx - 6, cy - 9], [cx - 6, cy - 1]], c); break;
+      case 'home': p.path([[cx - 12, cy + 8], [cx - 4, cy - 8], [cx + 5, cy + 6], [cx + 12, cy - 8]], c, 3).circle(cx + 12, cy - 8, 3.5, c); break;
+      case 'trap': p.ring(cx, cy, 8, c, 3).circle(cx, cy, 3, c); [0, 1.57, 3.14, 4.71].forEach((a) => p.line(cx + r(a)[0] * 8, cy + r(a)[1] * 8, cx + r(a)[0] * 14, cy + r(a)[1] * 14, c, 3)); break;
+      case 'line': [-9, 0, 9].forEach((o, i) => p.circle(cx + o, cy + 8 - i * 7, 4 + i * 0.8, c)); break;
+      case 'ring': for (let i = 0; i < 8; i++) { const a = (i / 8) * 6.28; p.circle(cx + Math.cos(a) * 11, cy + Math.sin(a) * 11, 2.6, c); } p.circle(cx, cy, 3, c); break;
+      case 'totem': p.rect(cx - 5, cy - 11, 10, 24, c).poly([[cx - 8, cy - 11], [cx, cy - 16], [cx + 8, cy - 11]], c).circle(cx, cy - 3, 3, BLACK); break;
+      default: p.circle(cx, cy, 8, c);
+    }
+    return;
+  }
+  if (d.kind === 'aura') {
+    p.ring(cx, cy, 12, c, 2.5, 0.8);
+    const k = d.stats?.[0]?.[0] ?? d.act?.t;
+    if (k === 'steal') p.poly([[cx, cy - 8], [cx + 6, cy + 2], [cx, cy + 8], [cx - 6, cy + 2]], c);
+    else if (k === 'gold') p.circle(cx, cy, 6, c).circle(cx, cy, 2.5, BLACK);
+    else if (k === 'critDmg') p.poly(star(cx, cy, 8, 3.5, 5), c);
+    else if (k === 'hp') p.rect(cx - 2.5, cy - 7, 5, 14, c).rect(cx - 7, cy - 2.5, 14, 5, c);
+    else if (k === 'speed') p.path([[cx - 6, cy - 6], [cx, cy], [cx - 6, cy + 6]], c, 3).path([[cx, cy - 6], [cx + 6, cy], [cx, cy + 6]], c, 3);
+    else if (k === 'slow') { [0, 1.05, 2.1].forEach((a) => p.line(cx - r(a)[0] * 8, cy - r(a)[1] * 8, cx + r(a)[0] * 8, cy + r(a)[1] * 8, c, 2.5)); }
+    else if (k === 'burn') p.poly([[cx, cy - 9], [cx + 6, cy + 2], [cx + 3, cy + 8], [cx - 3, cy + 8], [cx - 6, cy + 2]], c);
+    else p.poly([[cx - 7, cy + 6], [cx - 3, cy - 8], [cx, cy + 4], [cx + 3, cy - 8], [cx + 7, cy + 6]], c);
+    return;
+  }
+  if (d.kind === 'buff') {
+    switch (d.buff) {
+      case 'crit': p.poly(star(cx, cy, 12, 5, 4), c); break;
+      case 'freeze': [0, 1.05, 2.1].forEach((a) => p.line(cx - r(a)[0] * 12, cy - r(a)[1] * 12, cx + r(a)[0] * 12, cy + r(a)[1] * 12, c, 3)); p.circle(cx, cy, 3, c); break;
+      case 'phase': p.poly([[cx - 9, cy + 11], [cx - 9, cy - 3], [cx, cy - 12], [cx + 9, cy - 3], [cx + 9, cy + 11], [cx + 4, cy + 7], [cx, cy + 11], [cx - 4, cy + 7]], c).circle(cx - 3, cy - 2, 2, BLACK).circle(cx + 3, cy - 2, 2, BLACK); break;
+      case 'lifeline': p.poly([[cx, cy - 11], [cx + 8, cy], [cx, cy + 12], [cx - 8, cy]], c); p.rect(cx - 1.5, cy - 5, 3, 10, BLACK).rect(cx - 5, cy - 1.5, 10, 3, BLACK); break;
+      case 'blink': p.path([[cx - 11, cy - 8], [cx - 3, cy], [cx - 11, cy + 8]], c, 3.5).path([[cx + 1, cy - 8], [cx + 9, cy], [cx + 1, cy + 8]], c, 3.5); break;
+      case 'magnet': p.arc(cx, cy + 2, 9, 0, Math.PI, c, 5).rect(cx - 12, cy - 9, 5, 9, c).rect(cx + 7, cy - 9, 5, 9, c); break;
+      default: p.circle(cx, cy, 8, c);
+    }
+    return;
+  }
+  switch (d.mn) {
+    case 'shoot': p.ellipse(cx, cy, 16, 11, c).circle(cx, cy, 4, BLACK).line(cx + 8, cy, cx + 14, cy, c, 3); break;
+    case 'melee': p.rect(cx - 8, cy - 8, 16, 18, c).rect(cx - 5, cy - 4, 4, 4, BLACK).rect(cx + 1, cy - 4, 4, 4, BLACK); break;
+    case 'swarm': [[-8, -5], [5, -7], [0, 4], [9, 6], [-8, 8]].forEach(([dx, dy]) => p.poly([[cx + dx - 5, cy + dy - 3], [cx + dx, cy + dy], [cx + dx + 5, cy + dy - 3], [cx + dx, cy + dy + 3]], c)); break;
+    case 'turret': p.rect(cx - 7, cy - 2, 14, 12, c).rect(cx - 2, cy - 11, 12, 5, c).circle(cx - 1, cy + 3, 2.5, BLACK); break;
+    case 'bomber': p.circle(cx, cy + 3, 9, c).line(cx + 3, cy - 5, cx + 8, cy - 11, c, 2.5).circle(cx + 9, cy - 11, 2.8, 0xffffff); break;
+    case 'heal': p.circle(cx, cy, 11, c, 0.4); p.rect(cx - 2, cy - 7, 4, 14, c).rect(cx - 7, cy - 2, 14, 4, c); break;
+    default: p.circle(cx, cy, 8, c);
+  }
+}
+
 function skillGlyph(p: Pen, id: SkillId, cx: number, cy: number, c: number): void {
+  if (SKILLS[id].arch || !CORE_GLYPHS.has(id)) return genericGlyph(p, id, cx, cy, c);
   switch (id) {
     case 'blade': p.arc(cx + 3, cy, 12, Math.PI * 0.55, Math.PI * 1.45, c, 4).line(cx - 7, cy - 10, cx - 3, cy - 6, c, 3); break;
     case 'orbs': p.ellipse(cx, cy, 24, 15, c).circle(cx, cy, 5.5, BLACK).circle(cx - 1.5, cy - 1.5, 1.6, 0xffffff); break;

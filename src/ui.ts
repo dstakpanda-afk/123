@@ -5,7 +5,8 @@ import { BAG_SIZE, Character, getChar } from './char';
 import { Item, RARITY_COLOR, RARITY_NAME, SLOTS, SLOT_NAME, makeItem, sellValue } from './items';
 import { CLASS_START, KR, NODES, NODE_LIST, R, SECTORS, TreeNode, sectorColor } from './tree';
 import { H, S, W, hex, setupCam, spr } from './gfx';
-import { describeSkill } from './skills';
+import { describeSkill, pickGem } from './skills';
+import { LOGIN_REWARDS, QUESTS } from './daily';
 
 function btn(scene: Phaser.Scene, x: number, y: number, w: number, h: number, label: string, cb: () => void, fill = 0x22304f, stroke = 0x4d6bb3, size = 14): Phaser.GameObjects.GameObject[] {
   const r = scene.add.rectangle(x, y, w, h, fill).setStrokeStyle(2, stroke).setInteractive();
@@ -250,6 +251,7 @@ export class SkillsScene extends Phaser.Scene {
   private sel: Sel = null;
   private note = '';
   private view: 'list' | 'summary' = 'list';
+  private page = 0; private pageKey = '';
   private layer!: Phaser.GameObjects.Container;
 
   constructor() { super('skills'); }
@@ -317,10 +319,23 @@ export class SkillsScene extends Phaser.Scene {
     const showSupports = !!sel && sel.idx !== null;
     this.put(this.add.text(12, 398, showSupports ? 'Twoje supporty (dotknij, aby włożyć)' : (sel ? (sel.slot < 3 ? 'Twoje ataki (dotknij, aby włożyć)' : 'Twoje gemy pomocnicze (dotknij, aby włożyć)') : 'Twoje gemy'), { fontSize: '12px', color: '#a8b0d0' }));
     const cell = (i: number) => ({ x: 48 + (i % 4) * 88, y: 450 + Math.floor(i / 4) * 70 });
+    const PER = 12;
+    const key = showSupports ? 's' : sel ? (sel.slot < 3 ? 'a' : 'u') : 'all';
+    if (key !== this.pageKey) { this.pageKey = key; this.page = 0; }
+    const nav = (total: number) => {
+      const pages = Math.max(1, Math.ceil(total / PER));
+      this.page = Math.min(this.page, pages - 1);
+      if (pages > 1) {
+        this.put(btn(this, 262, 404, 36, 24, '‹', () => { this.page = (this.page + pages - 1) % pages; this.render(); }, 0x22304f, 0x4d6bb3, 16));
+        this.put(this.add.text(300, 404, `${this.page + 1}/${pages}`, { fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5));
+        this.put(btn(this, 338, 404, 36, 24, '›', () => { this.page = (this.page + 1) % pages; this.render(); }, 0x22304f, 0x4d6bb3, 16));
+      }
+    };
     if (showSupports) {
       const owned = SUPPORT_IDS.map((id) => ({ id, n: c.supportBag.filter((s) => s === id).length })).filter((o) => o.n > 0);
       if (!owned.length) this.put(this.add.text(W / 2, 480, 'Nie masz supportów.\nZnajdziesz je w łupie lub kupisz u handlarza.', { fontSize: '13px', color: '#8a82b4', align: 'center' }).setOrigin(0.5));
-      owned.forEach((o, i) => {
+      nav(owned.length);
+      owned.slice(this.page * PER, (this.page + 1) * PER).forEach((o, i) => {
         const { x, y } = cell(i), d = SUPPORTS[o.id];
         this.tile(x, y, 84, 64, d.color, false, () => {
           if (sel && sel.idx !== null) { c.setSupport(sel.slot, sel.idx, o.id); c.save(); this.note = `Włożono: ${d.name}`; } else this.note = `${d.name}: ${d.desc}`;
@@ -331,7 +346,9 @@ export class SkillsScene extends Phaser.Scene {
         this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: '#e4e9ff', align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
       });
     } else {
-      (sel ? (sel.slot < 3 ? ATTACK_IDS : UTILITY_IDS) : SKILL_IDS).filter((id) => c.skills[id] > 0).forEach((id, i) => {
+      const ids = (sel ? (sel.slot < 3 ? ATTACK_IDS : UTILITY_IDS) : SKILL_IDS).filter((id) => c.skills[id] > 0).sort((a, b) => c.skills[b] - c.skills[a]);
+      nav(ids.length);
+      ids.slice(this.page * PER, (this.page + 1) * PER).forEach((id, i) => {
         const { x, y } = cell(i), d = SKILLS[id];
         this.tile(x, y, 84, 64, d.color, false, () => {
           if (sel && sel.idx === null) { c.setSkill(sel.slot, id); c.save(); this.note = ''; this.view = 'summary'; } else this.note = `${d.name}: ${d.desc}`;
@@ -387,7 +404,7 @@ export class ShopScene extends Phaser.Scene {
   private msg = '';
 
   constructor() { super('shop'); }
-  init(): void { this.c = char(); this.msg = ''; }
+  init(): void { this.c = char(); this.msg = ''; this.c.checkDay(); }
 
   create(): void {
     base(this);
@@ -401,15 +418,15 @@ export class ShopScene extends Phaser.Scene {
     put(this.add.text(10, 14, 'HANDLARZ', { fontSize: '19px', color: '#c9a4ff', fontStyle: 'bold' }));
     put(this.add.text(140, 18, `Złoto: ${c.gold}`, { fontSize: '14px', color: '#ffd86b', fontStyle: 'bold' }));
     put(...btn(this, 330, 24, 50, 32, 'X', () => home(this), 0x4a2226, 0xc0392b, 15));
-    put(this.add.text(W / 2, 80, 'Cień w kapturze szepcze, że ma towar...\nza odpowiednią cenę.', { fontSize: '13px', color: '#a89fcc', align: 'center', fontStyle: 'italic' }).setOrigin(0.5));
+    put(this.add.text(W / 2, 74, 'Cień w kapturze szepcze, że ma towar...', { fontSize: '12px', color: '#a89fcc', align: 'center', fontStyle: 'italic' }).setOrigin(0.5));
     const ilvl = 2 + Math.floor(c.alloc.size / 25);
     const offers: { name: string; desc: string; cost: number; buy: () => string }[] = [
       { name: 'Losowy gem umiejętności', desc: 'Nowa umiejętność albo wyższy poziom znanej', cost: 150, buy: () => {
-        const pool = SKILL_IDS.filter((id) => c.skills[id] < MAX_SKILL), id = Phaser.Utils.Array.GetRandom(pool.length ? pool : SKILL_IDS);
+        const id = pickGem(c.skills, c.level);
         const r = c.addSkillGem(id);
         return `${SKILLS[id].name}: ${r === 'new' ? 'nowy gem!' : r === 'up' ? 'wyższy poziom!' : 'maks.'}`;
       } },
-      { name: 'Losowy support', desc: 'Jeden z 12 kamieni wspierających', cost: 100, buy: () => {
+      { name: 'Losowy support', desc: `Jeden z ${SUPPORT_IDS.length} kamieni wspierających`, cost: 100, buy: () => {
         const id = Phaser.Utils.Array.GetRandom(SUPPORT_IDS); c.addSupportGem(id); return `Support: ${SUPPORTS[id].name}`;
       } },
       { name: 'Przedmiot rzadki lub lepszy', desc: 'Losowy slot, co najmniej rzadki', cost: 120, buy: () => {
@@ -417,9 +434,17 @@ export class ShopScene extends Phaser.Scene {
         return `${it.name} (${RARITY_NAME[it.rarity]}): ${r === 'equipped' ? 'założony' : r === 'bag' ? 'w plecaku' : 'sprzedany, plecak pełny'}`;
       } },
     ];
+    if (!c.daily.shopBought) {
+      let seed = (c.daily.day.split('-').join('') as unknown as number) * 7919;
+      const ids = Object.keys(SKILLS).filter((id) => (SKILLS[id].lv ?? 1) <= c.level + 3).sort(), pickId = ids[Math.abs(Math.floor(Math.sin(seed++) * 10000)) % Math.max(1, ids.length)];
+      offers.unshift({ name: `Gem dnia: ${SKILLS[pickId].name}`, desc: `${KIND_NAME[SKILLS[pickId].kind]}, tylko dziś i taniej (−40%)`, cost: 90, buy: () => {
+        const r = c.addSkillGem(pickId); c.daily.shopBought = true;
+        return `${SKILLS[pickId].name}: ${r === 'new' ? 'nowy gem!' : r === 'up' ? 'wyższy poziom!' : 'maks.'}`;
+      } });
+    }
     offers.forEach((o, i) => {
-      const y = 160 + i * 100, ok = c.gold >= o.cost;
-      put(this.add.rectangle(W / 2, y, 336, 86, 0x14102a).setStrokeStyle(2, ok ? 0x8a74c9 : 0x2a3050));
+      const y = 140 + i * 92, ok = c.gold >= o.cost;
+      put(this.add.rectangle(W / 2, y, 336, 82, 0x14102a).setStrokeStyle(2, ok ? 0x8a74c9 : 0x2a3050));
       put(this.add.text(24, y - 32, o.name, { fontSize: '15px', color: '#fff', fontStyle: 'bold' }));
       put(this.add.text(24, y - 8, o.desc, { fontSize: '12px', color: '#c2bae6', wordWrap: { width: 190 } }));
       put(...btn(this, 290, y + 8, 92, 44, `${o.cost} zł`, () => {
@@ -427,7 +452,7 @@ export class ShopScene extends Phaser.Scene {
         c.gold -= o.cost; this.msg = o.buy(); c.save(); this.render();
       }, ok ? 0x2b5a3a : 0x22242f, ok ? 0x4ade80 : 0x40466a, 15));
     });
-    put(this.add.text(W / 2, 490, this.msg, { fontSize: '15px', color: '#ffd86b', align: 'center', wordWrap: { width: 320 }, fontStyle: 'bold' }).setOrigin(0.5));
+    put(this.add.text(W / 2, 600, this.msg, { fontSize: '15px', color: '#ffd86b', align: 'center', wordWrap: { width: 320 }, fontStyle: 'bold' }).setOrigin(0.5));
   }
 }
 
@@ -483,5 +508,51 @@ export class AchScene extends Phaser.Scene {
       this.list.y = Phaser.Math.Clamp(this.list.y + (p.y - p.prevPosition.y) / S, -this.maxScroll, 0);
     });
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => { this.list.y = Phaser.Math.Clamp(this.list.y - dy * 0.5, -this.maxScroll, 0); });
+  }
+}
+
+// ================= ZADANIA DZIENNE =================
+export class DailyScene extends Phaser.Scene {
+  private c!: Character;
+  private layer!: Phaser.GameObjects.Container;
+  private msg = '';
+
+  constructor() { super('daily'); }
+  init(): void { this.c = char(); this.msg = ''; this.c.checkDay(); }
+  create(): void { base(this); this.layer = this.add.container(0, 0); this.render(); }
+
+  private render(): void {
+    const c = this.c, d = c.daily, put = (...o: Phaser.GameObjects.GameObject[]) => o.forEach((x) => this.layer.add(x));
+    this.layer.removeAll(true);
+    put(this.add.text(10, 14, 'ZADANIA DZIENNE', { fontSize: '19px', color: '#c9a4ff', fontStyle: 'bold' }));
+    put(...btn(this, 330, 24, 50, 32, 'X', () => home(this), 0x4a2226, 0xc0392b, 15));
+    // seria logowań
+    put(this.add.text(12, 62, `Seria logowań: ${d.streak} ${d.streak === 1 ? 'dzień' : 'dni'}`, { fontSize: '12px', color: '#ffd86b', fontStyle: 'bold' }));
+    const cur = (d.streak - 1) % 7;
+    LOGIN_REWARDS.forEach((r, i) => {
+      const x = 28 + i * 50, past = i < cur || (i === cur && d.loginClaimed), now = i === cur;
+      put(this.add.rectangle(x, 106, 44, 56, past ? 0x16301f : now ? 0x3a2f12 : 0x141a30).setStrokeStyle(now ? 3 : 2, past ? 0x4ade80 : now ? 0xffd86b : 0x2a3050));
+      put(this.add.text(x, 90, `${i + 1}`, { fontSize: '12px', color: '#a8b0d0', fontStyle: 'bold' }).setOrigin(0.5));
+      put(this.add.text(x, 112, r.item ? 'item\n+zł' : r.gem ? 'gem\n+zł' : r.support ? 'supp.\n+zł' : `${r.gold}\nzł`, { fontSize: '10px', color: past ? '#7be8a8' : '#fff', align: 'center' }).setOrigin(0.5));
+    });
+    if (!d.loginClaimed) put(...btn(this, W / 2, 158, 300, 34, `ODBIERZ NAGRODĘ DNIA ${cur + 1}: ${LOGIN_REWARDS[cur].text}`, () => { this.msg = c.claimLogin() ?? ''; this.render(); }, 0x2b5a3a, 0x4ade80, 12));
+    else put(this.add.text(W / 2, 158, 'Dzisiejsza nagroda odebrana. Wróć jutro po następną.', { fontSize: '12px', color: '#7be8a8' }).setOrigin(0.5));
+    // zadania
+    put(this.add.text(12, 196, 'DZISIEJSZE WYZWANIA (nowe o północy)', { fontSize: '13px', color: '#8f86b3', fontStyle: 'bold' }));
+    d.quests.forEach((q, i) => {
+      const def = QUESTS.find((x) => x.id === q.id);
+      if (!def) return;
+      const y = 250 + i * 86, done = q.prog >= def.goal;
+      put(this.add.rectangle(W / 2, y, 340, 76, q.claimed ? 0x16301f : 0x141a30).setStrokeStyle(2, q.claimed ? 0x4ade80 : done ? 0xffd86b : 0x2a3050));
+      put(this.add.text(20, y - 31, def.name, { fontSize: '12px', color: q.claimed ? '#7be8a8' : '#fff', fontStyle: 'bold', wordWrap: { width: 215 } }));
+      put(this.add.text(20, y + 1, `Nagroda: ${def.gold} zł · ${Math.round(def.xp * 100)}% XP poziomu${def.gem ? ' · gem' : ''}`, { fontSize: '10px', color: '#c2bae6', wordWrap: { width: 215 } }));
+      put(this.add.rectangle(20, y + 18, 190, 8, 0x000000).setOrigin(0, 0.5));
+      put(this.add.rectangle(20, y + 18, 190 * Math.min(1, q.prog / def.goal), 8, done ? 0xffd86b : 0x8fa9ff).setOrigin(0, 0.5));
+      put(this.add.text(216, y + 18, `${q.prog}/${def.goal}`, { fontSize: '11px', color: '#fff' }).setOrigin(0, 0.5));
+      if (q.claimed) put(this.add.text(300, y, '✓', { fontSize: '26px', color: '#7be8a8', fontStyle: 'bold' }).setOrigin(0.5));
+      else put(...btn(this, 300, y, 84, 40, done ? 'ODBIERZ' : 'w toku', () => { if (done) { this.msg = c.claimQuest(i) ?? ''; this.render(); } }, done ? 0x2b5a3a : 0x22242f, done ? 0x4ade80 : 0x40466a, 12));
+    });
+    put(this.add.text(W / 2, 540, this.msg, { fontSize: '13px', color: '#ffd86b', align: 'center', wordWrap: { width: 330 }, fontStyle: 'bold' }).setOrigin(0.5));
+    put(this.add.text(W / 2, 600, `Złoto: ${c.gold}`, { fontSize: '13px', color: '#ffd86b' }).setOrigin(0.5));
   }
 }
