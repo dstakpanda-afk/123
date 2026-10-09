@@ -80,14 +80,15 @@ export const KIND_NAME: Record<SkillKind, string> = { attack: 'atak', aura: 'aur
 export const xpNeed = (level: number): number => Math.round(30 * Math.pow(1.22, level - 1));
 
 // ---------- tryby wypraw ----------
-export type ModeId = 'quick' | 'long';
+export type ModeId = 'quick' | 'long' | 'free';
 export interface ModeDef {
   name: string; desc: string; target: number; hpMul: number; dmgMul: number; xpMul: number; goldMul: number;
-  eliteEvery: number; boss: boolean; size: number; ramp: number; color: number;
+  eliteEvery: number; boss: boolean; free: boolean; size: number; ramp: number; color: number;
 }
 export const MODES: Record<ModeId, ModeDef> = {
-  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–3 min · 120 wrogów na mapie', target: 120, hpMul: 0.6, dmgMul: 0.6, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, size: 52, ramp: 0.4, color: 0x4ade80 },
-  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.9, dmgMul: 1.5, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, size: 76, ramp: 0.9, color: 0xff4d6d },
+  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–3 min · 120 wrogów na mapie', target: 120, hpMul: 0.6, dmgMul: 0.6, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, free: false, size: 52, ramp: 0.4, color: 0x4ade80 },
+  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.9, dmgMul: 1.5, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, free: false, size: 76, ramp: 0.9, color: 0xff4d6d },
+  free: { name: 'TRYB WOLNY', desc: 'bez końca · kolejne piętra przez portal\nboss co 3. piętro, grasz dopóki chcesz', target: 130, hpMul: 0.85, dmgMul: 0.85, xpMul: 1, goldMul: 1.5, eliteEvery: 26, boss: false, free: true, size: 60, ramp: 0.6, color: 0xb18cff },
 };
 
 // ---------- supporty ----------
@@ -141,23 +142,21 @@ export const CLASSES: Record<ClassId, ClassDef> = {
 export const CLASS_IDS: ClassId[] = ['blood', 'star', 'void', 'deep', 'dream', 'bone'];
 
 // ---------- bossowie i osiągnięcia (jednorazowe punkty drzewka) ----------
-export type BossMove = 'slam' | 'ring' | 'quake' | 'charge';
-export interface BossDef { id: string; name: string; minLevel: number; hpMul: number; dmgMul: number; scale: number; tint: number; moves: BossMove[] }
+export type BossMove = 'slam' | 'ring' | 'quake' | 'charge' | 'spiral' | 'summon';
+export interface BossDef { id: string; name: string; biome: string; hpMul: number; dmgMul: number; scale: number; moves: BossMove[]; desc: string }
 export const BOSSES: BossDef[] = [
-  { id: 'guard', name: 'Strażnik Progu', minLevel: 1, hpMul: 1, dmgMul: 1, scale: 1.7, tint: 0xff7070, moves: ['slam', 'charge'] },
-  { id: 'devourer', name: 'Pożeracz Gwiazd', minLevel: 10, hpMul: 1.5, dmgMul: 1.2, scale: 1.9, tint: 0xffd36b, moves: ['ring', 'charge', 'slam'] },
-  { id: 'mother', name: 'Matka Otchłani', minLevel: 20, hpMul: 2.2, dmgMul: 1.4, scale: 2.1, tint: 0xc77dff, moves: ['quake', 'ring', 'slam'] },
-  { id: 'nameless', name: 'Bezimienny', minLevel: 30, hpMul: 3.2, dmgMul: 1.7, scale: 2.3, tint: 0x6ee7ff, moves: ['quake', 'ring', 'charge', 'slam'] },
+  { id: 'b_void', name: 'Wielki Szeptacz', biome: 'void', hpMul: 1, dmgMul: 1, scale: 1.1, moves: ['quake', 'spiral', 'ring'], desc: 'wiruje pociskami, stawia kręgi wstrząsu' },
+  { id: 'b_flesh', name: 'Matka Trzewi', biome: 'flesh', hpMul: 1.2, dmgMul: 1, scale: 1.15, moves: ['summon', 'slam', 'ring'], desc: 'przyzywa rój, miażdży obszarowo' },
+  { id: 'b_bone', name: 'Kościany Regent', biome: 'bone', hpMul: 1.1, dmgMul: 1.1, scale: 1.1, moves: ['charge', 'summon', 'quake'], desc: 'szarżuje, wzywa sługi, zsyła wstrząsy' },
+  { id: 'b_deep', name: 'Głębinowy Lewiatan', biome: 'deep', hpMul: 1.3, dmgMul: 1.1, scale: 1.2, moves: ['slam', 'spiral', 'charge'], desc: 'uderza, wiruje pociskami, szarżuje' },
+  { id: 'b_ash', name: 'Popielny Tyran', biome: 'ash', hpMul: 1.25, dmgMul: 1.25, scale: 1.15, moves: ['slam', 'ring', 'charge', 'quake'], desc: 'najcięższe uderzenia ze wszystkich' },
+  { id: 'b_frost', name: 'Pani Zimna', biome: 'frost', hpMul: 1.15, dmgMul: 1.15, scale: 1.1, moves: ['spiral', 'quake', 'summon', 'ring'], desc: 'lodowe spirale, kręgi i przyzywanie' },
 ];
 export const BOSS_POINTS = 3;
-/** pierwszy jeszcze niepokonany boss dostępny na tym poziomie, a gdy wszystkie pokonane: najwyższy dostępny */
-export function pickBoss(level: number, killed: Record<string, boolean>): BossDef {
-  const ok = BOSSES.filter((b) => b.minLevel <= level);
-  return ok.find((b) => !killed[b.id]) ?? ok[ok.length - 1];
-}
+export const bossFor = (biome: string): BossDef => BOSSES.find((b) => b.biome === biome) ?? BOSSES[0];
 
-export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number }
-export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0 };
+export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number; maxFloor: number }
+export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0, maxFloor: 0 };
 export interface Achievement { id: string; name: string; desc: string; pts: number; goal: number; value: (t: Totals, level: number) => number }
 export const ACHIEVEMENTS: Achievement[] = [
   { id: 'kill100', name: 'Pierwsza krew', desc: 'Pokonaj 100 wrogów', pts: 1, goal: 100, value: (t) => t.kills },
@@ -174,5 +173,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'gems10', name: 'Kolekcjoner', desc: 'Znajdź 10 gemów', pts: 1, goal: 10, value: (t) => t.gems },
   { id: 'gems50', name: 'Skarbiec', desc: 'Znajdź 50 gemów', pts: 2, goal: 50, value: (t) => t.gems },
   { id: 'legend', name: 'Legenda', desc: 'Znajdź legendarny przedmiot', pts: 2, goal: 1, value: (t) => t.legendary },
+  { id: 'floor5', name: 'Głębiny', desc: 'Dotrzyj do 5. piętra w trybie wolnym', pts: 2, goal: 5, value: (t) => t.maxFloor },
+  { id: 'floor10', name: 'Bez dna', desc: 'Dotrzyj do 10. piętra w trybie wolnym', pts: 3, goal: 10, value: (t) => t.maxFloor },
   { id: 'maxgem', name: 'Wyszkolony', desc: 'Rozwiń gem do maks. poziomu', pts: 2, goal: 1, value: (t) => t.maxSkill },
 ];

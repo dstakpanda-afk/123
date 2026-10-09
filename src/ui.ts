@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { BIOMES } from './map';
 import { ACHIEVEMENTS, ATTACK_IDS, BOSSES, BOSS_POINTS, CLASSES, KIND_NAME, MAX_SKILL, SKILLS, SKILL_IDS, UTILITY_IDS, STAT_LABEL, StatKey, SUPPORTS, SUPPORT_IDS, fmtStat, fmtStats } from './data';
 import { BAG_SIZE, Character, getChar } from './char';
 import { Item, RARITY_COLOR, RARITY_NAME, SLOTS, SLOT_NAME, makeItem, sellValue } from './items';
@@ -459,8 +460,8 @@ export class AchScene extends Phaser.Scene {
     };
     section(`BOSSOWIE: pierwsze pokonanie daje +${BOSS_POINTS} pkt`);
     BOSSES.forEach((b) => {
-      const done = !!c.bosses[b.id], locked = c.level < b.minLevel;
-      row(b.name, locked ? `Odblokowuje się na poziomie ${b.minLevel}` : done ? 'Pokonany' : 'Czeka w wielkiej wyprawie', done, -1, done ? `+${BOSS_POINTS}` : locked ? `poz. ${b.minLevel}` : `+${BOSS_POINTS} pkt`, done ? '#7be8a8' : locked ? '#6f6896' : '#ffd86b');
+      const done = !!c.bosses[b.id], bn = BIOMES.find((x) => x.id === b.biome)?.name ?? '';
+      row(b.name, done ? `Pokonany · ${bn}` : `${bn} · ${b.desc}`, done, -1, done ? `+${BOSS_POINTS}` : `+${BOSS_POINTS} pkt`, done ? '#7be8a8' : '#ffd86b');
     });
     y += 6;
     section('OSIĄGNIĘCIA');

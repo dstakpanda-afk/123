@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BOSS_POINTS, BossDef, pickBoss, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
+import { BOSS_POINTS, BossDef, bossFor, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
 import { countOf, skillBase } from './skills';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
@@ -12,8 +12,8 @@ interface Enemy {
   obj: Phaser.GameObjects.Image; hp: number; maxHp: number; speed: number; dmg: number; r: number; xp: number;
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; boss: boolean; dead: boolean;
   kind: Kind; awake: boolean; pack: number; ph: number; hy: number;
-  st: 'move' | 'wind' | 'dash' | 'rest'; stT: number; cd: number; ax: number; ay: number; act: string; stuck: number;
-  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number;
+  st: 'move' | 'wind' | 'dash' | 'rest' | 'channel'; stT: number; cd: number; ax: number; ay: number; act: string; stuck: number;
+  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number;
 }
 interface EShot { obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; dmg: number }
 interface Tele { x: number; y: number; R: number; t: number; t0: number; dmg: number; color: number }
@@ -38,7 +38,8 @@ export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
   private hp = 100;
   private invuln = 0;
-  time_ = 0; private kills = 0; private total = 0; private regenAcc = 0;
+  time_ = 0; private kills = 0; private floorKills = 0; private floor = 1; private target = 0; private total = 0;
+  private portal: { x: number; y: number } | null = null; private portalOpen = false; private busy = false; private mmImg: Phaser.GameObjects.Image | null = null; private regenAcc = 0;
   private xpGained = 0; private startLevel = 1;
   private bossDef: BossDef | null = null; private unlocked: string[] = [];
   private enemies: Enemy[] = []; private shots: Shot[] = []; private zones: Zone[] = []; private drops: Drop[] = [];
@@ -58,6 +59,7 @@ export class GameScene extends Phaser.Scene {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private hudTxt!: Phaser.GameObjects.Text;
   private hpTxt!: Phaser.GameObjects.Text;
+  private bossTxt!: Phaser.GameObjects.Text;
   private killTxt!: Phaser.GameObjects.Text;
   private bars!: Phaser.GameObjects.Graphics;
   private ebars!: Phaser.GameObjects.Graphics;
@@ -73,7 +75,7 @@ export class GameScene extends Phaser.Scene {
     this.char.recalc();
     this.mode = MODES[data?.mode ?? 'quick'];
     this.hp = this.char.maxHp;
-    this.invuln = 0; this.time_ = 0; this.kills = 0; this.total = 0; this.regenAcc = 0;
+    this.invuln = 0; this.time_ = 0; this.kills = 0; this.floorKills = 0; this.floor = 1; this.total = 0; this.regenAcc = 0; this.portal = null; this.portalOpen = false; this.busy = false; this.mmImg = null;
     this.xpGained = 0; this.startLevel = this.char.level; this.bossDef = null; this.unlocked = [];
     this.enemies = []; this.shots = []; this.zones = []; this.drops = []; this.states = []; this.icons = [];
     this.packs = []; this.eshots = []; this.teles = []; this.flowKey = -1; this.flowT = 0; this.mmDirty = false; this.mmT = 0;
@@ -83,15 +85,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     setupCam(this);
-    const seed = Math.floor(Math.random() * 1e9);
-    this.map = generateMap(this.mode.size, seed);
-    this.cameras.main.setBackgroundColor(this.map.biome.void);
-    this.mapView = new MapView(this, this.map, seed);
-    this.flow = new Int16Array(this.map.w * this.map.h);
-    this.seen = new Uint8Array(this.map.w * this.map.h);
-    this.player = spr(this, (this.map.start[0] + 0.5) * TILE, (this.map.start[1] + 0.5) * TILE, `pl_${this.char.cls}`).setDepth(10);
-    this.cameras.main.setScroll(this.player.x - W / 2, this.player.y - H / 2);
-    this.mapView.update(this.player.x - W / 2, this.player.y - H / 2, W, H, 999);
+    this.player = spr(this, 0, 0, `pl_${this.char.cls}`).setDepth(10);
     this.tgfx = this.add.graphics().setDepth(3);
     this.events.once('shutdown', () => {
       this.mapView?.destroy(); this.mapView = null;
@@ -104,13 +98,14 @@ export class GameScene extends Phaser.Scene {
     const ts = { fontSize: '13px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 };
     this.hpTxt = this.add.text(78, 21, '', { ...ts, fontSize: '12px' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
     this.killTxt = this.add.text(W / 2 + 10, 14, '', { ...ts, fontSize: '16px' }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(101);
+    this.bossTxt = this.add.text(142, 69, '', { fontSize: '10px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setScrollFactor(0).setDepth(102).setVisible(false);
     this.hudTxt = this.add.text(8, 44, '', { ...ts, fontSize: '12px' }).setScrollFactor(0).setDepth(101);
     this.stick = this.add.graphics().setScrollFactor(0).setDepth(100);
     const qb = this.add.rectangle(322, 30, 70, 28, 0x3a2226).setStrokeStyle(2, 0xc0626f).setScrollFactor(0).setDepth(100).setInteractive();
     this.quitTxt = this.add.text(322, 30, 'ZAKOŃCZ', { fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
     qb.on('pointerdown', () => {
       if (this.over) return;
-      if (this.quitArmed) return this.end(false);
+      if (this.quitArmed) return this.end(this.mode.free && this.floor > 1);
       this.quitArmed = true; this.quitTxt.setText('NA PEWNO?');
       this.time.delayedCall(2000, () => { this.quitArmed = false; this.quitTxt.setText('ZAKOŃCZ'); });
     });
@@ -120,15 +115,58 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointerup', () => { this.stickOrigin = null; });
     this.buildStates();
     this.refreshStats();
-    this.populate();
-    this.mmCanvas = this.textures.createCanvas('mm', this.map.w, this.map.h);
-    this.mmCanvas?.setFilter(Phaser.Textures.FilterMode.NEAREST);
     this.add.rectangle(284, 50, 68, 68, 0x000000, 0.45).setOrigin(0).setScrollFactor(0).setDepth(98).setStrokeStyle(1, 0xffffff, 0.35);
-    this.add.image(284, 50, 'mm').setOrigin(0).setScale(68 / Math.max(this.map.w, this.map.h)).setScrollFactor(0).setDepth(99);
-    this.reveal(true);
-    this.toast(this.map.biome.name, '#c9a4ff');
+    this.loadLevel();
     this.icons = this.states.map((s, i) => spr(this, W / 2 + (i - (this.states.length - 1) / 2) * 50, H - 30, `ic_${s.id}`).setScale(40 / 44 / S).setScrollFactor(0).setDepth(100));
     Object.assign(window, { __game: this, __mk: makeItem }); // do testów
+  }
+
+  /** buduje (lub przebudowuje) piętro: mapa, wrogowie, minimapa */
+  private loadLevel(): void {
+    for (const e of this.enemies) e.obj.destroy();
+    for (const sh of this.shots) sh.obj.destroy();
+    for (const sh of this.eshots) sh.obj.destroy();
+    for (const z of this.zones) z.obj.destroy();
+    for (const d of this.drops) { d.obj.destroy(); d.beam?.destroy(); }
+    this.enemies = []; this.shots = []; this.eshots = []; this.zones = []; this.drops = []; this.packs = []; this.teles = [];
+    this.floorKills = 0; this.portal = null; this.portalOpen = false; this.flowKey = -1;
+    this.mapView?.destroy();
+    const seed = Math.floor(Math.random() * 1e9);
+    this.map = generateMap(this.mode.size, seed);
+    this.cameras.main.setBackgroundColor(this.map.biome.void);
+    this.mapView = new MapView(this, this.map, seed);
+    this.flow = new Int16Array(this.map.w * this.map.h);
+    this.seen = new Uint8Array(this.map.w * this.map.h);
+    this.player.setPosition((this.map.start[0] + 0.5) * TILE, (this.map.start[1] + 0.5) * TILE);
+    this.cameras.main.setScroll(this.player.x - W / 2, this.player.y - H / 2);
+    this.mapView.update(this.player.x - W / 2, this.player.y - H / 2, W, H, 999);
+    this.target = this.mode.free ? Math.min(220, this.mode.target + 12 * (this.floor - 1)) : this.mode.target;
+    this.populate();
+    if (this.mode.free) this.portal = { x: (this.map.far[0] + 0.5) * TILE, y: (this.map.far[1] + 0.5) * TILE };
+    this.mmImg?.destroy();
+    if (this.textures.exists('mm')) this.textures.remove('mm');
+    this.mmCanvas = this.textures.createCanvas('mm', this.map.w, this.map.h);
+    this.mmCanvas?.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    this.mmImg = this.add.image(284, 50, 'mm').setOrigin(0).setScale(68 / Math.max(this.map.w, this.map.h)).setScrollFactor(0).setDepth(99);
+    this.mmDirty = false; this.mmT = 0;
+    this.reveal(true);
+    this.toast(this.mode.free ? `Piętro ${this.floor}: ${this.map.biome.name}` : this.map.biome.name, '#c9a4ff');
+  }
+
+  /** wejście do portalu: następne piętro */
+  private nextFloor(): void {
+    this.busy = true;
+    this.floor++;
+    this.char.totals.maxFloor = Math.max(this.char.totals.maxFloor, this.floor);
+    this.checkAch(); this.char.save();
+    const cam = this.cameras.main;
+    cam.fadeOut(260, 10, 8, 20);
+    cam.once('camerafadeoutcomplete', () => {
+      this.loadLevel();
+      this.heal(Math.round(this.char.maxHp * 0.4));
+      cam.fadeIn(260, 10, 8, 20);
+      this.busy = false;
+    });
   }
 
   // ---------- statystyki biegu (postać + aury + chwilowe wzmocnienia) ----------
@@ -169,7 +207,7 @@ export class GameScene extends Phaser.Scene {
   // ---------- pętla ----------
   update(_t: number, dtMs: number): void {
     this.drawHud();
-    if (this.over) return;
+    if (this.over || this.busy) return;
     const dt = Math.min(dtMs, 50) / 1000;
     this.time_ += dt; this.invuln -= dt;
     this.tickFx(dt);
@@ -192,8 +230,18 @@ export class GameScene extends Phaser.Scene {
     cam.scrollY += (this.player.y - H / 2 - cam.scrollY) * k;
     this.mapView?.update(cam.scrollX, cam.scrollY, W, H);
 
-    if (this.hp <= 0) this.end(false);
-    else if (this.enemies.length === 0) this.end(true);
+    if (this.hp <= 0) this.end(this.mode.free && this.floor > 1);
+    else if (this.mode.free) this.portalTick();
+    else if (this.enemies.every((e) => e.sum)) { for (const e of this.enemies) e.obj.destroy(); this.enemies = []; this.end(true); }
+  }
+
+  private portalTick(): void {
+    if (!this.portal) return;
+    const left = this.enemies.filter((e) => !e.sum).length, boss = this.enemies.some((e) => e.boss);
+    if (!this.portalOpen && !boss && left <= Math.max(3, this.total * 0.12)) {
+      this.portalOpen = true; this.toast('PORTAL OTWARTY: wejdź, aby zejść głębiej', '#b18cff');
+    }
+    if (this.portalOpen && this.dist(this.player, this.portal) < 30) this.nextFloor();
   }
 
   private tickFx(dt: number): void {
@@ -342,8 +390,8 @@ export class GameScene extends Phaser.Scene {
       for (let i = 0; i < roster.length; i++) { r -= ws[i]; if (r <= 0) return roster[i]; }
       return roster[0];
     };
-    const nElite = md.eliteEvery > 0 ? Math.floor(md.target / md.eliteEvery) : 0;
-    let left = md.target - nElite;
+    const nElite = md.eliteEvery > 0 ? Math.floor(this.target / md.eliteEvery) : 0;
+    let left = this.target - nElite;
     let pack = 0;
     const depthOf = (i: number) => m.dist[i] / m.maxDist;
     const add = (kind: Kind, i: number, d: number, grp: Enemy[]) => { const [x, y] = around(i); grp.push(this.makeEnemy(kind, x, y, d, pack)); };
@@ -363,20 +411,20 @@ export class GameScene extends Phaser.Scene {
       else { for (let k = 0; k < n; k++) add(k === 0 || rnd() < 0.75 || lead === 'swarm' ? lead : 'melee', i, d, grp); left -= n; }
       this.packs.push(grp); pack++;
     }
-    if (md.boss) {
-      this.bossDef = pickBoss(this.char.level, this.char.bosses);
+    if (md.boss || (md.free && this.floor % 3 === 0)) {
+      this.bossDef = bossFor(m.biome.id);
       this.packs.push([this.makeEnemy('boss', (m.far[0] + 0.5) * TILE, (m.far[1] + 0.5) * TILE, 1, pack)]);
     }
     this.total = this.enemies.length;
   }
 
-  private makeEnemy(kind: Kind, x: number, y: number, depth: number, pack: number): Enemy {
-    const L = this.char.level, bid = this.map.biome.id;
-    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul;
-    const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul * (1 + 0.15 * depth);
-    const xpScale = (1 + 0.2 * (L - 1)) * this.mode.xpMul;
+  private makeEnemy(kind: Kind, x: number, y: number, depth: number, pack: number, sum = false): Enemy {
+    const L = this.char.level, bid = this.map.biome.id, fl = this.floor - 1;
+    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul * (1 + 0.12 * fl) * (sum ? 0.5 : 1);
+    const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul * (1 + 0.15 * depth) * (1 + 0.07 * fl);
+    const xpScale = (1 + 0.2 * (L - 1)) * this.mode.xpMul * (1 + 0.1 * fl);
     let key = `e_elite_${bid}`, r = 22, hp = 150, speed = 50, dmg = 12, xp = 12, big = 1;
-    if (kind === 'boss' && this.bossDef) { r = 22 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
+    if (kind === 'boss' && this.bossDef) { key = `boss_${bid}`; r = 28 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
     else if (kind !== 'elite' && kind !== 'boss') { const a = ARCHS[kind]; key = `e_${a.shape}_${bid}`; r = a.r; hp = a.hp; speed = a.speed; dmg = a.dmg; xp = a.xp; }
     const obj = spr(this, x, y, key).setDepth(kind === 'boss' ? 6 : 5);
     if (big !== 1) obj.setScale(big / S);
@@ -385,7 +433,7 @@ export class GameScene extends Phaser.Scene {
     const e: Enemy = {
       obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0,
       elite: kind === 'elite', boss: kind === 'boss', dead: false, kind, awake: false, pack, ph: Math.random() * 6.28, hy: y,
-      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0,
+      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0,
     };
     this.enemies.push(e);
     return e;
@@ -721,7 +769,8 @@ export class GameScene extends Phaser.Scene {
   private kill(e: Enemy): void {
     if (e.dead) return;
     e.dead = true;
-    this.kills++;
+    if (e.sum) { e.obj.destroy(); this.enemies.splice(this.enemies.indexOf(e), 1); return; }
+    this.kills++; this.floorKills++;
     this.xpFly(e.obj.x, e.obj.y);
     this.xpGained += e.xp;
     this.char.totals.kills++;
@@ -857,6 +906,17 @@ export class GameScene extends Phaser.Scene {
         }
         e.cd = 4.2 + Math.random(); break;
       }
+      case 'spiral':
+        e.st = 'channel'; e.stT = 2.4; e.emitT = 0; e.ax = Math.random() * 6.28; e.cd = 3.4; break;
+      case 'summon': {
+        const alive = this.enemies.filter((x) => x.sum).length;
+        for (let i = 0; i < 4 && alive + i < 10; i++) {
+          const a = Math.random() * 6.28, x = e.obj.x + Math.cos(a) * 60, y = e.obj.y + Math.sin(a) * 60;
+          if (this.solidAt(x, y)) continue;
+          const m = this.makeEnemy('melee', x, y, 0.3, e.pack, true); m.awake = true;
+        }
+        e.cd = 5.5; break;
+      }
       case 'boom':
         this.tele(e.obj.x, e.obj.y, 58, 0.22, e.dmg * 1.8, PALETTE[this.map.biome.id].body);
         this.kill(e); break;
@@ -912,7 +972,7 @@ export class GameScene extends Phaser.Scene {
       case 'boss': {
         chase(e.speed);
         const mv = this.bossDef?.moves ?? ['slam'];
-        if (e.cd <= 0 && d < 400) { const act = mv[e.moveI++ % mv.length]; this.windup(e, act, act === 'slam' ? 0.9 : act === 'charge' ? 0.7 : 0.55, ux, uy); }
+        if (e.cd <= 0 && d < 400) { const act = mv[e.moveI++ % mv.length]; this.windup(e, act, act === 'slam' ? 0.9 : act === 'charge' ? 0.7 : act === 'summon' ? 0.9 : 0.55, ux, uy); }
         break;
       }
       default: chase(e.speed);
@@ -933,7 +993,6 @@ export class GameScene extends Phaser.Scene {
       else if (winding) e.obj.setTint(0xff7070);
       else if (e.frozenT > 0 || e.slowT > 0) e.obj.setTint(0x8fc4ff);
       else if (e.burnT > 0) e.obj.setTint(0xffa060);
-      else if (e.boss && this.bossDef) e.obj.setTint(this.bossDef.tint);
       else if (e.elite && e.aff === 'quake') e.obj.setTint(0xc77dff);
       else e.obj.clearTint();
 
@@ -1004,6 +1063,12 @@ export class GameScene extends Phaser.Scene {
         g.lineStyle(e.r * 1.4, 0xff3b3b, 0.22).lineBetween(e.obj.x, e.obj.y, e.obj.x + e.ax * len, e.obj.y + e.ay * len);
       }
     }
+    if (this.portal) {
+      const o = this.portalOpen, t = this.time_, pr = this.portal;
+      g.lineStyle(3, o ? 0xb18cff : 0x555577, o ? 0.9 : 0.5).strokeCircle(pr.x, pr.y, 22 + Math.sin(t * 3) * (o ? 2 : 0.5));
+      g.fillStyle(o ? 0xb18cff : 0x555577, o ? 0.28 : 0.1).fillCircle(pr.x, pr.y, 22);
+      if (o) { g.lineStyle(2, 0xe6d6ff, 0.8).strokeCircle(pr.x, pr.y, 13 + Math.sin(t * 5) * 2); g.fillStyle(0xffffff, 0.5).fillCircle(pr.x, pr.y, 5); }
+    }
     this.teles = this.teles.filter((t) => {
       t.t -= dt;
       const k = 1 - Math.max(0, t.t) / t.t0;
@@ -1022,16 +1087,18 @@ export class GameScene extends Phaser.Scene {
   private end(win: boolean): void {
     this.over = true; this.stick.clear();
     const c = this.char, md = this.mode;
-    const gold = Math.floor((this.kills * 0.8) * (1 + this.st.gold) * md.goldMul * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
+    const gold = md.free
+      ? Math.floor((this.kills * 0.8 + 25 * (this.floor - 1)) * (1 + this.st.gold) * md.goldMul)
+      : Math.floor((this.kills * 0.8) * (1 + this.st.gold) * md.goldMul * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
     c.gold += gold; c.runs++; c.totals.runs++; if (win) { c.wins++; c.totals.wins++; if (md.boss) c.totals.longWins++; }
     this.checkAch();
     c.save();
     const w = W;
     const dim = this.add.rectangle(0, 0, w, H, 0x000000, 0.8).setOrigin(0).setScrollFactor(0).setDepth(200).setInteractive();
     const gained = c.level - this.startLevel;
-    this.add.text(w / 2, 200, win ? 'ZWYCIĘSTWO' : 'KONIEC WYPRAWY', { fontSize: '32px', color: win ? '#4ade80' : '#c9a4ff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+    this.add.text(w / 2, 200, md.free ? 'KONIEC WYPRAWY' : win ? 'ZWYCIĘSTWO' : 'KONIEC WYPRAWY', { fontSize: '32px', color: win && !md.free ? '#4ade80' : '#c9a4ff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     this.add.text(w / 2, 232, md.name, { fontSize: '13px', color: '#a8b0d0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
-    this.add.text(w / 2, 335, `Pokonani: ${this.kills} / ${this.total}\nZnalezione: ${this.found}\n\n+${Math.round(this.xpGained)} XP${gained > 0 ? `  (poziom ${c.level}, +${gained} pkt drzewka)` : ''}\n+${gold} złota${this.unlocked.length ? '\nOsiągnięcia: ' + this.unlocked.join(', ') : ''}`, { fontSize: '17px', color: '#fff', align: 'center', lineSpacing: 5, wordWrap: { width: 330 } }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+    this.add.text(w / 2, 335, `${md.free ? `Piętro: ${this.floor}\nPokonani: ${this.kills}` : `Pokonani: ${this.kills} / ${this.total}`}\nZnalezione: ${this.found}\n\n+${Math.round(this.xpGained)} XP${gained > 0 ? `  (poziom ${c.level}, +${gained} pkt drzewka)` : ''}\n+${gold} złota${this.unlocked.length ? '\nOsiągnięcia: ' + this.unlocked.join(', ') : ''}`, { fontSize: '17px', color: '#fff', align: 'center', lineSpacing: 5, wordWrap: { width: 330 } }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     this.add.text(w / 2, 520, 'Dotknij, aby wrócić', { fontSize: '14px', color: '#8892b0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     dim.on('pointerdown', () => this.scene.start('menu'));
   }
@@ -1054,24 +1121,31 @@ export class GameScene extends Phaser.Scene {
     if (this.fx.shield > 0) { b.fillStyle(0x8fd3ff, 0.9).fillRect(10, 18, Math.min(136, 136 * this.fx.shield / ch.maxHp), 5); }
     this.hpTxt.setText(`${Math.max(0, Math.ceil(this.hp))} / ${ch.maxHp}`);
     // postęp: liczba wrogów
-    const pr = Math.min(1, this.kills / Math.max(1, this.total)), bx = 160, bw = 100;
+    const pr = Math.min(1, this.floorKills / Math.max(1, this.total)), bx = 160, bw = 100;
     b.fillStyle(0x000000, 0.75).fillRect(bx, 16, bw, 24);
     b.fillStyle(md.color).fillRect(bx + 2, 18, (bw - 4) * pr, 20);
     b.fillStyle(0xffffff, 0.22).fillRect(bx + 2, 18, (bw - 4) * pr, 6);
     b.lineStyle(2, 0xffffff, 0.8).strokeRect(bx, 16, bw, 24);
-    this.killTxt.setPosition(bx + bw / 2, 20).setText(this.enemies.length === 1 && this.enemies[0].boss ? 'BOSS' : `${this.kills} / ${this.total}`);
-    this.hudTxt.setText(`Poziom ${ch.level}`);
+    this.killTxt.setPosition(bx + bw / 2, 20).setText(this.enemies.some((e) => e.boss) && this.enemies.filter((e) => !e.sum).length === 1 ? 'BOSS' : `${this.floorKills} / ${this.total}`);
+    this.hudTxt.setText(md.free ? `Poziom ${ch.level}   Piętro ${this.floor}` : `Poziom ${ch.level}`);
     // minimapa: wrogowie tylko na odkrytym terenie, a gdy zostało ich mało — wszyscy
     {
-      const mw = this.map.w, sc = 68 / Math.max(mw, this.map.h), showAll = this.enemies.length <= 15;
+      const mw = this.map.w, sc = 68 / Math.max(mw, this.map.h), showAll = this.enemies.filter((e) => !e.sum).length <= 15;
       for (const e of this.enemies) {
+        if (e.sum) continue;
         const tx = Math.floor(e.obj.x / TILE), ty = Math.floor(e.obj.y / TILE);
         if (!showAll && !this.seen[ty * mw + tx]) continue;
         const sz = e.boss ? 5 : e.elite ? 3.5 : 2.2;
         b.fillStyle(e.boss ? 0xff3b3b : e.elite ? 0xffa500 : 0xff6b81).fillRect(284 + (e.obj.x / TILE) * sc - sz / 2, 50 + (e.obj.y / TILE) * sc - sz / 2, sz, sz);
       }
+      if (this.portal) b.fillStyle(this.portalOpen ? 0xb18cff : 0x666688).fillRect(284 + (this.portal.x / TILE) * sc - 2.5, 50 + (this.portal.y / TILE) * sc - 2.5, 5, 5);
       b.fillStyle(0x8fffd0).fillRect(284 + (this.player.x / TILE) * sc - 2, 50 + (this.player.y / TILE) * sc - 2, 4, 4);
     }
+    const boss = this.enemies.find((e) => e.boss && e.awake);
+    if (boss && this.bossDef) {
+      b.fillStyle(0x000000, 0.75).fillRect(8, 62, 268, 14).fillStyle(0xff3b3b).fillRect(10, 64, 264 * Math.max(0, boss.hp / boss.maxHp), 10).lineStyle(2, 0xffffff, 0.8).strokeRect(8, 62, 268, 14);
+      this.bossTxt.setText(this.bossDef.name).setVisible(true);
+    } else this.bossTxt.setVisible(false);
     // ikony umiejętności z odliczaniem
     this.states.forEach((st, i) => {
       const ic = this.icons[i];

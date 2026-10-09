@@ -178,6 +178,69 @@ export function makeTextures(scene: Phaser.Scene): void {
       p.poly([[20, 45], [44, 45], [40, 52], [24, 52]], BLACK);
     });
   });
+  // ----- bossowie biomów (po jednym, unikalnym) -----
+  tex(scene, 'boss_void', 72, 72, (p) => {
+    p.ellipse(36, 66, 52, 10, BLACK, 0.5);
+    for (let i = 0; i < 6; i++) { const x = 14 + i * 8.8, x2 = x + (i % 2 ? 5 : -5); p.line(x, 48, x2, 67, BLACK, 6).line(x, 48, x2, 67, 0x6b4aa0, 3); }
+    p.poly([[16, 18], [18, 1], [28, 11]], 0xe6c9ff, BLACK, 2).poly([[56, 18], [54, 1], [44, 11]], 0xe6c9ff, BLACK, 2).poly([[30, 8], [36, 0], [42, 8]], 0xe6c9ff, BLACK, 2);
+    p.circle(36, 36, 29, BLACK).circle(36, 36, 26.5, 0x5a3d9a).circle(26, 25, 9, 0x8f6bd6, 0.5).ring(36, 36, 26.5, 0xe6c9ff, 2, 0.8);
+    [[23, 36], [49, 36], [36, 21]].forEach(([x, y]) => { p.ellipse(x, y, 15, 11, 0xffffff).circle(x, y, 5, 0xd7191c).circle(x, y, 2, BLACK); });
+    p.poly([[22, 49], [50, 49], [44, 58], [28, 58]], BLACK);
+    [26, 32, 38, 44].forEach((x) => p.poly([[x, 49], [x + 3, 49], [x + 1.5, 54]], 0xffffff));
+  });
+  tex(scene, 'boss_flesh', 72, 72, (p) => {
+    p.ellipse(36, 67, 56, 9, BLACK, 0.5);
+    [[14, 34, 13], [58, 34, 13], [22, 18, 12], [50, 18, 12], [36, 12, 12]].forEach(([x, y, r]) => p.circle(x, y, r + 2, BLACK));
+    p.circle(36, 40, 30, BLACK);
+    [[14, 34, 13], [58, 34, 13], [22, 18, 12], [50, 18, 12], [36, 12, 12]].forEach(([x, y, r]) => p.circle(x, y, r, 0xa8283f));
+    p.circle(36, 40, 27.5, 0xc23a55).circle(26, 28, 9, 0xff8fa3, 0.4);
+    p.path([[8, 34], [16, 40], [14, 50]], 0xff8fa3, 2).path([[64, 34], [56, 42], [58, 52]], 0xff8fa3, 2).path([[36, 14], [32, 24], [38, 30]], 0xff8fa3, 2);
+    [[22, 24], [36, 20], [50, 24], [14, 36], [58, 36]].forEach(([x, y]) => { p.circle(x, y, 5, 0xffffff).circle(x, y, 2.4, 0x7a0f1f).circle(x - 0.8, y - 0.8, 0.8, 0xffffff); });
+    p.ellipse(36, 52, 30, 16, BLACK);
+    [-10, -4, 2, 8].forEach((o) => p.poly([[36 + o, 45], [36 + o + 5, 45], [36 + o + 2.5, 52]], 0xffffff));
+    p.ellipse(36, 57, 14, 5, 0x7a0f1f);
+  });
+  tex(scene, 'boss_bone', 72, 72, (p) => {
+    p.ellipse(36, 67, 52, 9, BLACK, 0.5);
+    p.ellipse(36, 58, 40, 18, BLACK).ellipse(36, 58, 36, 14, 0xd9d0b8);
+    [-12, -4, 4, 12].forEach((o) => p.line(36 + o, 52, 36 + o * 1.3, 64, 0x4a4234, 2));
+    p.circle(36, 32, 22, BLACK).circle(36, 32, 19.5, 0xece4cc).circle(28, 24, 6, 0xffffff, 0.35);
+    p.circle(28, 32, 6.5, BLACK).circle(44, 32, 6.5, BLACK).circle(28, 32, 2.6, 0xff4d4d).circle(44, 32, 2.6, 0xff4d4d);
+    p.poly([[34, 38], [38, 38], [36, 43]], BLACK);
+    p.rect(26, 45, 20, 9, BLACK); [28, 32, 36, 40].forEach((x) => p.rect(x, 45, 3, 6, 0xece4cc));
+    p.poly([[16, 18], [17, 3], [26, 12], [36, 0], [46, 12], [55, 3], [56, 18]], 0xffd24d, BLACK, 2.2);
+    p.circle(36, 8, 2.2, 0xd7191c).circle(21, 12, 1.6, 0x4ff0d2).circle(51, 12, 1.6, 0x4ff0d2);
+  });
+  tex(scene, 'boss_deep', 72, 72, (p) => {
+    p.ellipse(36, 67, 56, 9, BLACK, 0.5);
+    [[10, 44, 4, 66], [22, 50, 18, 69], [36, 52, 36, 70], [50, 50, 54, 69], [62, 44, 68, 66]].forEach(([a, b, c, d]) => { p.line(a, b, c, d, BLACK, 8).line(a, b, c, d, 0x22857d, 5); });
+    p.poly([[8, 28], [0, 14], [18, 22]], 0x22857d, BLACK, 2).poly([[64, 28], [72, 14], [54, 22]], 0x22857d, BLACK, 2);
+    p.ellipse(36, 32, 60, 46, BLACK).ellipse(36, 32, 56, 42, 0x2fa59a).ellipse(30, 20, 26, 12, 0x6fe0d2, 0.35);
+    [[16, 36], [56, 36], [24, 46], [48, 46]].forEach(([x, y]) => p.circle(x, y, 2.5, 0x1a6f68));
+    p.circle(36, 28, 14, BLACK).circle(36, 28, 12.5, 0xffffff).ellipse(36, 28, 9, 20, 0xffd24d).ellipse(36, 28, 3.6, 17, BLACK);
+    for (let i = 0; i < 9; i++) p.poly([[14 + i * 5.5, 47], [18 + i * 5.5, 47], [16 + i * 5.5, 53]], 0xffffff);
+  });
+  tex(scene, 'boss_ash', 72, 72, (p) => {
+    p.ellipse(36, 67, 54, 10, BLACK, 0.5);
+    p.poly([[12, 30], [2, 4], [26, 20]], 0x2a1a14, BLACK, 2.2).poly([[60, 30], [70, 4], [46, 20]], 0x2a1a14, BLACK, 2.2);
+    p.poly([[18, 16], [22, 4], [28, 14], [36, 0], [44, 14], [50, 4], [54, 16]], 0xff8a3d, BLACK, 2);
+    p.circle(36, 42, 28, BLACK).circle(36, 42, 25.5, 0x3a2018).circle(26, 32, 8, 0x6a3a28, 0.5);
+    p.path([[16, 52], [22, 44], [20, 36]], 0xff8a3d, 2.6).path([[56, 52], [50, 44], [54, 34]], 0xff8a3d, 2.6).path([[36, 56], [32, 48], [38, 44]], 0xff8a3d, 2.6);
+    p.poly([[18, 32], [32, 36], [18, 40]], 0xffd36b, BLACK, 1.5).poly([[54, 32], [40, 36], [54, 40]], 0xffd36b, BLACK, 1.5);
+    p.ellipse(36, 54, 24, 11, BLACK).ellipse(36, 55, 18, 6, 0xff8a3d);
+    p.poly([[6, 50], [-1, 40], [12, 44]], 0x2a1a14, BLACK, 1.5).poly([[66, 50], [73, 40], [60, 44]], 0x2a1a14, BLACK, 1.5);
+  });
+  tex(scene, 'boss_frost', 72, 72, (p) => {
+    p.ellipse(36, 67, 50, 9, BLACK, 0.5);
+    p.poly([[36, 18], [66, 66], [6, 66]], BLACK).poly([[36, 21], [61, 64], [11, 64]], 0x2d5f94);
+    p.poly([[36, 30], [52, 64], [20, 64]], 0x1b3f66, undefined);
+    p.circle(36, 26, 17, BLACK).circle(36, 26, 15, 0x1b3f66).ellipse(36, 28, 17, 13, 0x0a1a2e);
+    p.circle(30, 28, 2.8, 0xcfeeff).circle(42, 28, 2.8, 0xcfeeff);
+    [[18, 14, 14, 0, 24, 8], [26, 10, 30, -4, 34, 8], [38, 8, 42, -4, 46, 10], [48, 10, 56, 0, 54, 16]].forEach(([a, b, c, d, e, f]) => p.poly([[a, b], [c, d], [e, f]], 0xcfeeff, BLACK, 1.6));
+    p.circle(62, 44, 9, 0xcfeeff, 0.3).circle(62, 44, 6.5, BLACK).circle(62, 44, 5, 0xcfeeff).circle(60.5, 42.5, 1.6, 0xffffff);
+    p.line(62, 50, 58, 68, BLACK, 4).line(62, 50, 58, 68, 0x8fb8d8, 2);
+    p.poly([[8, 40], [3, 30], [13, 36]], 0xcfeeff, BLACK, 1.4).poly([[12, 56], [4, 52], [14, 48]], 0xcfeeff, BLACK, 1.4);
+  });
   tex(scene, 'eshot', 18, 18, (p) => { p.circle(9, 9, 8.5, 0xff3b6b, 0.35).circle(9, 9, 6, BLACK).circle(9, 9, 4.8, 0xff6b81).circle(9, 9, 2.2, 0xffffff); });
   // ----- łup, XP, pociski -----
   tex(scene, 'xp', 16, 16, (p) => { p.poly([[8, 1], [14, 8], [8, 15], [2, 8]], 0x8fe3ff, BLACK, 1.8).poly([[8, 4], [11, 8], [8, 6.5]], 0xffffff); });

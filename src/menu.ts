@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BOSS_POINTS, CLASSES, CLASS_IDS, MODES, ModeId, SKILLS, fmtShort, pickBoss, xpNeed } from './data';
+import { BOSS_POINTS, CLASSES, CLASS_IDS, MODES, ModeId, SKILLS, fmtShort, xpNeed } from './data';
 import { Character, getChar, setChar } from './char';
 import { H, S, W, hex, setupCam, spr } from './gfx';
 
@@ -27,22 +27,22 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(w / 2, 124, `Punkty drzewka: ${c.points}   ·   Złoto: ${c.gold}`, { fontSize: '14px', color: '#fff' }).setOrigin(0.5);
     this.add.text(w / 2, 144, `Wyprawy: ${c.runs}   ·   Wygrane: ${c.wins}`, { fontSize: '12px', color: '#8f86b3' }).setOrigin(0.5);
 
-    const boss = pickBoss(c.level, c.bosses);
-    (['quick', 'long'] as ModeId[]).forEach((id, i) => {
-      const md = MODES[id], y = 200 + i * 80;
-      const r = this.add.rectangle(w / 2, y, 330, 72, id === 'quick' ? 0x1d3d2c : 0x4a1f2b).setStrokeStyle(3, md.color).setInteractive();
-      this.add.text(w / 2, y - 24, md.name, { fontSize: '18px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
-      this.add.text(w / 2, id === 'long' ? y + 12 : y + 6, id === 'long' ? `ok. 4–6 min · 500 wrogów · ×2 XP, ×3 złota\nboss: ${boss.name}${c.bosses[boss.id] ? '' : ` · 1. raz: +${BOSS_POINTS} pkt`}` : md.desc, { fontSize: '12px', color: '#e4e9ff', align: 'center', lineSpacing: 2 }).setOrigin(0.5);
+    (['quick', 'long', 'free'] as ModeId[]).forEach((id, i) => {
+      const md = MODES[id], y = 184 + i * 62, tint = id === 'quick' ? 0x1d3d2c : id === 'long' ? 0x4a1f2b : 0x2c2350;
+      const r = this.add.rectangle(w / 2, y, 330, 56, tint).setStrokeStyle(3, md.color).setInteractive();
+      this.add.text(w / 2, y - 18, md.name, { fontSize: '16px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
+      const desc = id === 'long' ? `ok. 4–6 min · 500 wrogów · ×2 XP, ×3 złota\nboss krainy · 1. pokonanie każdego: +${BOSS_POINTS} pkt` : id === 'free' ? `${md.desc}${c.totals.maxFloor ? `\nrekord: piętro ${c.totals.maxFloor}` : ''}` : md.desc;
+      this.add.text(w / 2, y + 8, desc, { fontSize: '11px', color: '#e4e9ff', align: 'center', lineSpacing: 1 }).setOrigin(0.5);
       r.on('pointerup', () => this.scene.start('game', { mode: id }));
     });
     const pts = c.points > 0 ? ` (${c.points})` : '';
-    button(this, 95, 346, 156, 44, `DRZEWKO${pts}`, () => this.scene.start('tree'), c.points > 0 ? 0x2b5a3a : 0x22304f, c.points > 0 ? 0x4ade80 : 0x4d6bb3);
-    button(this, 265, 346, 156, 44, 'UMIEJĘTNOŚCI', () => this.scene.start('skills'));
-    button(this, 95, 396, 156, 44, 'EKWIPUNEK', () => this.scene.start('inv'));
-    button(this, 265, 396, 156, 44, 'HANDLARZ', () => this.scene.start('shop'));
+    button(this, 95, 366, 156, 44, `DRZEWKO${pts}`, () => this.scene.start('tree'), c.points > 0 ? 0x2b5a3a : 0x22304f, c.points > 0 ? 0x4ade80 : 0x4d6bb3);
+    button(this, 265, 366, 156, 44, 'UMIEJĘTNOŚCI', () => this.scene.start('skills'));
+    button(this, 95, 414, 156, 44, 'EKWIPUNEK', () => this.scene.start('inv'));
+    button(this, 265, 414, 156, 44, 'HANDLARZ', () => this.scene.start('shop'));
 
-    button(this, w / 2, 446, 330, 40, 'OSIĄGNIĘCIA I BOSSOWIE', () => this.scene.start('ach'), 0x3a3320, 0x9b8a4d, 14);
-    this.add.text(16, 484, 'Aktywny zestaw', { fontSize: '13px', color: '#8f86b3' });
+    button(this, w / 2, 462, 330, 36, 'OSIĄGNIĘCIA I BOSSOWIE', () => this.scene.start('ach'), 0x3a3320, 0x9b8a4d, 14);
+    this.add.text(16, 490, 'Aktywny zestaw', { fontSize: '13px', color: '#8f86b3' });
     c.loadout.forEach((l, i) => {
       const x = 30 + i * 56, y = 534;
       this.add.rectangle(x + (i >= 3 ? 14 : 0), y, 46, 46, 0x120e24).setStrokeStyle(2, l.skill ? SKILLS[l.skill].color : 0x2a3050);
