@@ -13,7 +13,7 @@ interface Enemy {
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; boss: boolean; dead: boolean;
   kind: Kind; awake: boolean; pack: number; ph: number; hy: number;
   st: 'move' | 'wind' | 'dash' | 'rest' | 'channel'; stT: number; cd: number; ax: number; ay: number; act: string; stuck: number;
-  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number; p2: boolean; volT: number; kx: number; ky: number;
+  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number; p2: boolean; volT: number; kx: number; ky: number; hdx: number; hdy: number; dashT: number;
 }
 interface EShot { obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; dmg: number }
 interface Tele { x: number; y: number; R: number; t: number; t0: number; dmg: number; color: number }
@@ -446,7 +446,7 @@ export class GameScene extends Phaser.Scene {
     const e: Enemy = {
       obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0,
       elite: kind === 'elite', boss: kind === 'boss', dead: false, kind, awake: false, pack, ph: Math.random() * 6.28, hy: y,
-      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0, p2: false, volT: 1.5, kx: 0, ky: 0,
+      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0, p2: false, volT: 1.5, kx: 0, ky: 0, hdx: 0, hdy: 0, dashT: 0,
     };
     this.enemies.push(e);
     return e;
@@ -905,7 +905,7 @@ export class GameScene extends Phaser.Scene {
     e.st = 'rest'; e.stT = 0.35;
     switch (e.act) {
       case 'dash': case 'charge':
-        e.st = 'dash'; e.stT = b ? 0.6 : 0.38; e.cd = b ? 2.4 : 3; break;
+        e.st = 'dash'; e.dashT = 0; e.stT = b ? 0.6 : 0.38; e.cd = b ? 2.4 : 3; break;
       case 'spit':
         this.enemyShot(e, toward, 165, e.dmg * 0.9); e.cd = 2.4 + Math.random() * 0.8; break;
       case 'volley':
@@ -1038,15 +1038,20 @@ export class GameScene extends Phaser.Scene {
       if (e.losT <= 0) { e.losT = 0.15; e.los = this.clear(ex, ey, P.x, P.y, e.r > 14 ? 9 : 5); }
       const sf = e.frozenT > 0 ? 0 : e.slowT > 0 ? 0.5 : 1, rr = Math.min(e.r, 11);
       const chase = (sp: number) => {
-        let mx = ux, my = uy;
-        if (!e.los || e.stuck > 0) [mx, my] = this.descend(this.flow, e.obj.x, e.obj.y);
+        let tx = ux, ty = uy;
+        if (!e.los || e.stuck > 0) [tx, ty] = this.descend(this.flow, e.obj.x, e.obj.y);
+        if (!e.hdx && !e.hdy) { e.hdx = tx; e.hdy = ty; }
+        const kk = Math.min(1, 10 * dt);
+        e.hdx += (tx - e.hdx) * kk; e.hdy += (ty - e.hdy) * kk;
+        const hl = Math.hypot(e.hdx, e.hdy) || 1, mx = e.hdx / hl, my = e.hdy / hl;
         if (!this.slide(e.obj, mx * sp * sf * dt, my * sp * sf * dt, rr) && sf > 0) e.stuck = 0.5;
       };
       if (sf > 0) {
         if (e.st === 'wind') { e.stT -= dt; if (e.stT <= 0) this.execute(e); }
         else if (e.st === 'dash') {
-          e.stT -= dt;
-          const ok = this.slide(e.obj, e.ax * (e.boss ? 330 : 310) * dt, e.ay * (e.boss ? 330 : 310) * dt, rr);
+          e.stT -= dt; e.dashT += dt;
+          const ease = Math.min(1, 0.2 + e.dashT / 0.12), ds = (e.boss ? 330 : 310) * ease;
+          const ok = this.slide(e.obj, e.ax * ds * dt, e.ay * ds * dt, rr);
           if (!ok || e.stT <= 0) { e.st = 'rest'; e.stT = 0.5; }
         } else if (e.st === 'rest') { e.stT -= dt; if (e.stT <= 0) e.st = 'move'; }
         else this.think(e, d, ux, uy, chase, dt);
