@@ -418,6 +418,16 @@ export class GameScene extends Phaser.Scene {
     this.total = this.enemies.length;
   }
 
+  /** najbliższe miejsce, w którym zmieści się okrąg o promieniu r (żeby wróg nie wrósł w ścianę) */
+  private freeSpot(x: number, y: number, r: number): [number, number] {
+    if (this.canStand(x, y, r)) return [x, y];
+    for (let d = 5; d <= 56; d += 5) for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * 6.283, nx = x + Math.cos(a) * d, ny = y + Math.sin(a) * d;
+      if (this.canStand(nx, ny, r)) return [nx, ny];
+    }
+    return [x, y];
+  }
+
   private makeEnemy(kind: Kind, x: number, y: number, depth: number, pack: number, sum = false): Enemy {
     const L = this.char.level, bid = this.map.biome.id, fl = this.floor - 1;
     const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul * (1 + 0.12 * fl) * (sum ? 0.5 : 1);
@@ -426,6 +436,7 @@ export class GameScene extends Phaser.Scene {
     let key = `e_elite_${bid}`, r = 22, hp = 150, speed = 50, dmg = 12, xp = 12, big = 1;
     if (kind === 'boss' && this.bossDef) { key = `boss_${bid}`; r = 28 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
     else if (kind !== 'elite' && kind !== 'boss') { const a = ARCHS[kind]; key = `e_${a.shape}_${bid}`; r = a.r; hp = a.hp; speed = a.speed; dmg = a.dmg; xp = a.xp; }
+    [x, y] = this.freeSpot(x, y, Math.min(r, 11) + 2);
     const obj = spr(this, x, y, key).setDepth(kind === 'boss' ? 6 : 5);
     if (big !== 1) obj.setScale(big / S);
     const aff = Math.random() < 0.5 ? 'ring' : 'quake';
