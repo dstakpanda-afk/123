@@ -4,9 +4,10 @@ import { countOf, skillBase } from './skills';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
 import { H, S, W, setupCam, spr } from './gfx';
-import { GameMap, TILE, bfs, buildMapImages, generateMap } from './map';
+import { GameMap, MapView, TILE, bfs, generateMap } from './map';
+import { ARCHS, Arch, PALETTE, ROSTER } from './enemies';
 
-type Kind = 'grunt' | 'runner' | 'spitter' | 'brute' | 'elite' | 'boss';
+type Kind = Arch | 'elite' | 'boss';
 interface Enemy {
   obj: Phaser.GameObjects.Image; hp: number; maxHp: number; speed: number; dmg: number; r: number; xp: number;
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; boss: boolean; dead: boolean;
@@ -45,7 +46,7 @@ export class GameScene extends Phaser.Scene {
   private fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
   private over = false; private popCount = 0; private fxCount = 0; private found = 0;
   private map!: GameMap;
-  private mapView: { destroy: () => void } | null = null;
+  private mapView: MapView | null = null;
   private flow = new Int16Array(0); private flowKey = -1; private flowT = 0;
   private packs: Enemy[][] = [];
   private eshots: EShot[] = []; private teles: Tele[] = [];
@@ -85,11 +86,12 @@ export class GameScene extends Phaser.Scene {
     const seed = Math.floor(Math.random() * 1e9);
     this.map = generateMap(this.mode.size, seed);
     this.cameras.main.setBackgroundColor(this.map.biome.void);
-    this.mapView = buildMapImages(this, this.map, seed);
+    this.mapView = new MapView(this, this.map, seed);
     this.flow = new Int16Array(this.map.w * this.map.h);
     this.seen = new Uint8Array(this.map.w * this.map.h);
     this.player = spr(this, (this.map.start[0] + 0.5) * TILE, (this.map.start[1] + 0.5) * TILE, `pl_${this.char.cls}`).setDepth(10);
     this.cameras.main.setScroll(this.player.x - W / 2, this.player.y - H / 2);
+    this.mapView.update(this.player.x - W / 2, this.player.y - H / 2, W, H, 999);
     this.tgfx = this.add.graphics().setDepth(3);
     this.events.once('shutdown', () => {
       this.mapView?.destroy(); this.mapView = null;
@@ -122,7 +124,7 @@ export class GameScene extends Phaser.Scene {
     this.mmCanvas = this.textures.createCanvas('mm', this.map.w, this.map.h);
     this.mmCanvas?.setFilter(Phaser.Textures.FilterMode.NEAREST);
     this.add.rectangle(284, 50, 68, 68, 0x000000, 0.45).setOrigin(0).setScrollFactor(0).setDepth(98).setStrokeStyle(1, 0xffffff, 0.35);
-    this.add.image(284, 50, 'mm').setOrigin(0).setScale(68 / this.map.w).setScrollFactor(0).setDepth(99);
+    this.add.image(284, 50, 'mm').setOrigin(0).setScale(68 / Math.max(this.map.w, this.map.h)).setScrollFactor(0).setDepth(99);
     this.reveal(true);
     this.toast(this.map.biome.name, '#c9a4ff');
     this.icons = this.states.map((s, i) => spr(this, W / 2 + (i - (this.states.length - 1) / 2) * 50, H - 30, `ic_${s.id}`).setScale(40 / 44 / S).setScrollFactor(0).setDepth(100));
@@ -188,6 +190,7 @@ export class GameScene extends Phaser.Scene {
     const cam = this.cameras.main, k = Math.min(1, 9 * dt);
     cam.scrollX += (this.player.x - W / 2 - cam.scrollX) * k;
     cam.scrollY += (this.player.y - H / 2 - cam.scrollY) * k;
+    this.mapView?.update(cam.scrollX, cam.scrollY, W, H);
 
     if (this.hp <= 0) this.end(false);
     else if (this.enemies.length === 0) this.end(true);
@@ -332,54 +335,49 @@ export class GameScene extends Phaser.Scene {
       }
       return [(cx + 0.5) * TILE, (cy + 0.5) * TILE];
     };
+    const roster = ROSTER[m.biome.id] ?? ROSTER.void;
+    const pickArch = (d: number): Arch => {
+      const ws = roster.map((a) => Phaser.Math.Linear(ARCHS[a].w0, ARCHS[a].w1, d));
+      let r = rnd() * ws.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < roster.length; i++) { r -= ws[i]; if (r <= 0) return roster[i]; }
+      return roster[0];
+    };
     const nElite = md.eliteEvery > 0 ? Math.floor(md.target / md.eliteEvery) : 0;
     let left = md.target - nElite;
     let pack = 0;
     const depthOf = (i: number) => m.dist[i] / m.maxDist;
-    const kindFor = (d: number): Kind => {
-      const r = rnd();
-      if (r < 0.12 + 0.2 * d) return 'spitter';
-      if (r < 0.3 + 0.22 * d) return 'runner';
-      if (r < 0.4 + 0.2 * d) return 'brute';
-      return 'grunt';
-    };
+    const add = (kind: Kind, i: number, d: number, grp: Enemy[]) => { const [x, y] = around(i); grp.push(this.makeEnemy(kind, x, y, d, pack)); };
     for (let e = 0; e < nElite; e++) {
       const i = pick(); centers.push([i % m.w, (i / m.w) | 0]);
       const d = depthOf(i), grp: Enemy[] = [];
-      const [x, y] = around(i);
-      grp.push(this.makeEnemy('elite', x, y, d, pack));
-      for (let k = 0; k < 2 && left > 0; k++, left--) { const [gx, gy] = around(i); grp.push(this.makeEnemy('grunt', gx, gy, d, pack)); }
+      add('elite', i, d, grp);
+      for (let k = 0; k < 2 && left > 0; k++, left--) add('melee', i, d, grp);
       this.packs.push(grp); pack++;
     }
     while (left > 0) {
       const i = pick(); centers.push([i % m.w, (i / m.w) | 0]);
-      const d = depthOf(i), n = Math.min(left, 3 + Math.floor(rnd() * 3)), grp: Enemy[] = [];
-      const lead = kindFor(d);
-      for (let k = 0; k < n; k++) {
-        const [x, y] = around(i);
-        grp.push(this.makeEnemy(k === 0 || rnd() < 0.35 ? lead : rnd() < 0.7 ? 'grunt' : kindFor(d), x, y, d, pack));
-      }
-      left -= n; this.packs.push(grp); pack++;
+      const d = depthOf(i), grp: Enemy[] = [], lead = pickArch(d), def = ARCHS[lead];
+      const escorted = lead === 'totem' || lead === 'caster' || lead === 'slam';
+      let n = Math.min(left, def.pack[0] + Math.floor(rnd() * (def.pack[1] - def.pack[0] + 1)));
+      if (escorted) { add(lead, i, d, grp); n = Math.min(left - 1, 2 + Math.floor(rnd() * 2)); for (let k = 0; k < n; k++) add('melee', i, d, grp); left -= 1 + n; }
+      else { for (let k = 0; k < n; k++) add(k === 0 || rnd() < 0.75 || lead === 'swarm' ? lead : 'melee', i, d, grp); left -= n; }
+      this.packs.push(grp); pack++;
     }
     if (md.boss) {
       this.bossDef = pickBoss(this.char.level, this.char.bosses);
-      const grp = [this.makeEnemy('boss', (m.far[0] + 0.5) * TILE, (m.far[1] + 0.5) * TILE, 1, pack)];
-      this.packs.push(grp);
+      this.packs.push([this.makeEnemy('boss', (m.far[0] + 0.5) * TILE, (m.far[1] + 0.5) * TILE, 1, pack)]);
     }
     this.total = this.enemies.length;
   }
 
   private makeEnemy(kind: Kind, x: number, y: number, depth: number, pack: number): Enemy {
-    const L = this.char.level;
+    const L = this.char.level, bid = this.map.biome.id;
     const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul;
     const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul * (1 + 0.15 * depth);
     const xpScale = (1 + 0.2 * (L - 1)) * this.mode.xpMul;
-    let key = 'e_grunt', r = 11, hp = 12, speed = 55, dmg = 8, xp = 1, big = 1;
-    if (kind === 'runner') { key = 'e_fast'; r = 9; hp = 8; speed = 78; dmg = 7; }
-    else if (kind === 'spitter') { key = 'e_spit'; r = 10; hp = 9; speed = 60; dmg = 8; }
-    else if (kind === 'brute') { key = 'e_tank'; r = 18; hp = 60; speed = 38; dmg = 14; xp = 3; }
-    else if (kind === 'elite') { key = 'e_elite'; r = 22; hp = 150; speed = 50; dmg = 12; xp = 12; }
-    else if (kind === 'boss' && this.bossDef) { key = 'e_elite'; r = 22 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
+    let key = `e_elite_${bid}`, r = 22, hp = 150, speed = 50, dmg = 12, xp = 12, big = 1;
+    if (kind === 'boss' && this.bossDef) { r = 22 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
+    else if (kind !== 'elite' && kind !== 'boss') { const a = ARCHS[kind]; key = `e_${a.shape}_${bid}`; r = a.r; hp = a.hp; speed = a.speed; dmg = a.dmg; xp = a.xp; }
     const obj = spr(this, x, y, key).setDepth(kind === 'boss' ? 6 : 5);
     if (big !== 1) obj.setScale(big / S);
     const aff = Math.random() < 0.5 ? 'ring' : 'quake';
@@ -848,12 +846,26 @@ export class GameScene extends Phaser.Scene {
         e.st = 'dash'; e.stT = b ? 0.6 : 0.38; e.cd = b ? 2.4 : 3; break;
       case 'spit':
         this.enemyShot(e, toward, 165, e.dmg * 0.9); e.cd = 2.4 + Math.random() * 0.8; break;
+      case 'volley':
+        for (let i = -1; i <= 1; i++) this.enemyShot(e, toward + i * 0.26, 170, e.dmg * 0.8);
+        e.cd = 2.8 + Math.random() * 0.8; break;
+      case 'hex': {
+        const col = PALETTE[this.map.biome.id].accent;
+        for (let i = 0; i < 2; i++) {
+          const x = P.x + (i ? (Math.random() - 0.5) * 120 : 0), y = P.y + (i ? (Math.random() - 0.5) * 120 : 0);
+          if (!this.solidAt(x, y)) this.tele(x, y, 42, 1.0, e.dmg * 1.3, col);
+        }
+        e.cd = 4.2 + Math.random(); break;
+      }
+      case 'boom':
+        this.tele(e.obj.x, e.obj.y, 58, 0.22, e.dmg * 1.8, PALETTE[this.map.biome.id].body);
+        this.kill(e); break;
       case 'slam':
         e.stT = 0.5; e.cd = b ? 2.4 : 3.4; break;
       case 'ring': {
-        const n = b ? 16 : 10, off = Math.random() * 6.28;
+        const n = b ? 16 : e.kind === 'totem' ? 8 : 10, off = Math.random() * 6.28;
         for (let i = 0; i < n; i++) this.enemyShot(e, off + (i / n) * 6.28, 120, e.dmg * 0.7);
-        e.cd = b ? 3 : 4.4; break;
+        e.cd = b ? 3 : e.kind === 'totem' ? 3.6 : 4.4; break;
       }
       case 'quake': {
         const n = b ? 6 : 3;
@@ -868,19 +880,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   private think(e: Enemy, d: number, ux: number, uy: number, chase: (sp: number) => void, dt: number): void {
-    const rr = Math.min(e.r, 11);
+    const rr = Math.min(e.r, 11), back = () => { if (!this.slide(e.obj, -ux * e.speed * dt, -uy * e.speed * dt, rr)) this.slide(e.obj, -uy * e.speed * dt, ux * e.speed * dt, rr); };
     switch (e.kind) {
-      case 'runner':
+      case 'dash':
         chase(e.speed);
         if (e.cd <= 0 && e.los && d < 170 && d > 50) this.windup(e, 'dash', 0.5, ux, uy);
         break;
-      case 'spitter':
-        if (d < 115) {
-          if (!this.slide(e.obj, -ux * e.speed * dt, -uy * e.speed * dt, rr)) this.slide(e.obj, -uy * e.speed * dt, ux * e.speed * dt, rr);
-        } else if (d > 200 || !e.los) chase(e.speed);
-        if (e.cd <= 0 && e.los && d < 270) this.windup(e, 'spit', 0.35, ux, uy);
+      case 'spit': case 'volley':
+        if (d < 115) back(); else if (d > 200 || !e.los) chase(e.speed);
+        if (e.cd <= 0 && e.los && d < 270) this.windup(e, e.kind, 0.35, ux, uy);
         break;
-      case 'brute':
+      case 'caster':
+        if (d < 150) back(); else if (d > 260 || !e.los) chase(e.speed);
+        if (e.cd <= 0 && e.los && d < 300) this.windup(e, 'hex', 0.6, ux, uy);
+        break;
+      case 'totem':
+        if (e.cd <= 0 && e.los && d < 290) this.windup(e, 'ring', 0.5, ux, uy);
+        break;
+      case 'boom':
+        chase(e.speed);
+        if (d < 46) this.windup(e, 'boom', 0.35, ux, uy);
+        break;
+      case 'slam':
         chase(e.speed);
         if (e.cd <= 0 && d < 85) this.windup(e, 'slam', 0.8, ux, uy);
         break;
@@ -942,6 +963,7 @@ export class GameScene extends Phaser.Scene {
         } else if (e.st === 'rest') { e.stT -= dt; if (e.stT <= 0) e.st = 'move'; }
         else this.think(e, d, ux, uy, chase, dt);
       }
+      if (e.dead) continue;
       e.hy = e.obj.y;
       this.enemyBar(e, cam);
       if (this.dist(e.obj, P) < e.r + 12) this.hitPlayer(e.st === 'dash' ? e.dmg * 1.3 : e.dmg);
@@ -1041,7 +1063,7 @@ export class GameScene extends Phaser.Scene {
     this.hudTxt.setText(`Poziom ${ch.level}`);
     // minimapa: wrogowie tylko na odkrytym terenie, a gdy zostało ich mało — wszyscy
     {
-      const mw = this.map.w, sc = 68 / mw, showAll = this.enemies.length <= 15;
+      const mw = this.map.w, sc = 68 / Math.max(mw, this.map.h), showAll = this.enemies.length <= 15;
       for (const e of this.enemies) {
         const tx = Math.floor(e.obj.x / TILE), ty = Math.floor(e.obj.y / TILE);
         if (!showAll && !this.seen[ty * mw + tx]) continue;

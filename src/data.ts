@@ -86,8 +86,8 @@ export interface ModeDef {
   eliteEvery: number; boss: boolean; size: number; ramp: number; color: number;
 }
 export const MODES: Record<ModeId, ModeDef> = {
-  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–3 min · 120 wrogów na mapie', target: 120, hpMul: 0.6, dmgMul: 0.6, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, size: 40, ramp: 0.4, color: 0x4ade80 },
-  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.6, dmgMul: 1.3, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, size: 56, ramp: 0.9, color: 0xff4d6d },
+  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–3 min · 120 wrogów na mapie', target: 120, hpMul: 0.6, dmgMul: 0.6, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, size: 52, ramp: 0.4, color: 0x4ade80 },
+  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.9, dmgMul: 1.5, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, size: 76, ramp: 0.9, color: 0xff4d6d },
 };
 
 // ---------- supporty ----------

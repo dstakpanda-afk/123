@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { CLASS_IDS, CLASSES, ClassId, SKILLS, SKILL_IDS, SkillId } from './data';
+import { PALETTE } from './enemies';
+import { BIOMES } from './map';
 
 /** gra jest rysowana w podwójnej rozdzielczości; logiczny ekran to 360x640 */
 export const S = 2;
@@ -55,6 +57,11 @@ function tex(scene: Phaser.Scene, key: string, w: number, h: number, draw: (p: P
   g.destroy();
 }
 
+const mix = (a: number, b: number, t: number): number => {
+  const f = (s: number) => Math.round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t);
+  return (f(16) << 16) | (f(8) << 8) | f(0);
+};
+
 const star = (cx: number, cy: number, ro: number, ri: number, n = 5, rot = -Math.PI / 2): number[][] =>
   Array.from({ length: n * 2 }, (_, i) => { const r = i % 2 ? ri : ro, a = rot + (i * Math.PI) / n; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
 
@@ -107,39 +114,69 @@ export function makeTextures(scene: Phaser.Scene): void {
     p.circle(20, 19, 15.5, BLACK).circle(20, 19, 13.5, c).circle(15.5, 14.5, 4.5, 0xffffff, 0.35).ring(20, 19, 13.5, 0xffffff, 1.2, 0.7);
     classGlyph(p, id, 20, 19);
   }));
-  // ----- wrogowie -----
-  tex(scene, 'e_grunt', 32, 32, (p) => {
-    p.ellipse(16, 27, 22, 7, BLACK, 0.5);
-    p.circle(11, 23, 4.5, BLACK).circle(21, 23, 4.5, BLACK).circle(16, 15, 13, BLACK);
-    p.circle(11, 22.5, 3.5, 0xb03a5b).circle(21, 22.5, 3.5, 0xb03a5b).circle(16, 15, 11.5, 0xb03a5b);
-    p.circle(12, 10, 3, 0xe8607f, 0.6);
-    p.ellipse(16, 14, 11, 10, 0xffffff).circle(16, 15, 3.6, BLACK).circle(15, 13.8, 1.1, 0xffffff);
-  });
-  tex(scene, 'e_fast', 32, 32, (p) => {
-    p.ellipse(16, 27, 18, 6, BLACK, 0.45);
-    p.poly(star(16, 15, 14, 6, 6, -Math.PI / 2), 0x3fb8a0, BLACK, 2.5);
-    p.circle(16, 15, 4.5, 0xffffff).circle(16, 15, 2, BLACK);
-  });
-  tex(scene, 'e_tank', 48, 48, (p) => {
-    p.ellipse(24, 41, 34, 9, BLACK, 0.5);
-    p.circle(24, 22, 20, BLACK).circle(24, 22, 18, 0x6b4aa0).circle(18, 14, 5, 0x9b7bd6, 0.5);
-    p.circle(16, 17, 3.4, 0xffe066).circle(32, 17, 3.4, 0xffe066).circle(16, 17.5, 1.4, BLACK).circle(32, 17.5, 1.4, BLACK);
-    p.poly([[10, 26], [38, 26], [34, 36], [14, 36]], BLACK);
-    [14, 20, 26, 32].forEach((x) => p.poly([[x, 26], [x + 3, 26], [x + 1.5, 31]], 0xffffff));
-  });
-  tex(scene, 'e_elite', 64, 64, (p) => {
-    p.ellipse(32, 55, 44, 11, BLACK, 0.5);
-    p.poly([[14, 28], [10, 4], [26, 16]], 0xffe066, BLACK, 2).poly([[50, 28], [54, 4], [38, 16]], 0xffe066, BLACK, 2);
-    p.circle(32, 33, 25, BLACK).circle(32, 33, 22.5, 0xff9f1a).circle(23, 24, 7, 0xffd27a, 0.55);
-    p.ring(32, 33, 22.5, 0xffffff, 2, 0.9);
-    p.ellipse(32, 31, 22, 15, 0xffffff).circle(32, 31, 6.5, 0xd7191c).circle(32, 31, 2.8, BLACK);
-    p.poly([[20, 45], [44, 45], [40, 52], [24, 52]], BLACK);
-  });
-  tex(scene, 'e_spit', 36, 36, (p) => {
-    p.ellipse(18, 31, 22, 7, BLACK, 0.5);
-    p.poly([[18, 2], [31, 24], [5, 24]], BLACK).poly([[18, 5], [28, 23], [8, 23]], 0x3b7a6b);
-    p.ellipse(18, 17, 12, 9, BLACK).circle(14.5, 17, 2.2, 0xb7ff5a).circle(21.5, 17, 2.2, 0xb7ff5a);
-    p.circle(18, 29, 6, BLACK).circle(18, 29, 4.6, 0xb7ff5a).circle(16.5, 27.5, 1.6, 0xffffff, 0.8);
+  // ----- wrogowie (po jednym zestawie na biom) -----
+  BIOMES.forEach((bm) => {
+    const pal = PALETTE[bm.id], c = pal.body, ac = pal.accent, lt = mix(c, 0xffffff, 0.35), dk = mix(c, 0x000000, 0.45), id = bm.id;
+    tex(scene, `e_grunt_${id}`, 32, 32, (p) => {
+      p.ellipse(16, 27, 22, 7, BLACK, 0.5);
+      p.circle(11, 23, 4.5, BLACK).circle(21, 23, 4.5, BLACK).circle(16, 15, 13, BLACK);
+      p.circle(11, 22.5, 3.5, c).circle(21, 22.5, 3.5, c).circle(16, 15, 11.5, c).circle(12, 10, 3, lt, 0.6);
+      p.ellipse(16, 14, 11, 10, 0xffffff).circle(16, 15, 3.6, BLACK).circle(15, 13.8, 1.1, 0xffffff);
+    });
+    tex(scene, `e_fast_${id}`, 32, 32, (p) => {
+      p.ellipse(16, 27, 18, 6, BLACK, 0.45);
+      p.poly(star(16, 15, 14, 6, 6, -Math.PI / 2), c, BLACK, 2.5);
+      p.circle(16, 15, 4.5, 0xffffff).circle(16, 15, 2, BLACK);
+    });
+    tex(scene, `e_spit_${id}`, 36, 36, (p) => {
+      p.ellipse(18, 31, 22, 7, BLACK, 0.5);
+      p.poly([[18, 2], [31, 24], [5, 24]], BLACK).poly([[18, 5], [28, 23], [8, 23]], c);
+      p.ellipse(18, 17, 12, 9, BLACK).circle(14.5, 17, 2.2, ac).circle(21.5, 17, 2.2, ac);
+      p.circle(18, 29, 6, BLACK).circle(18, 29, 4.6, ac).circle(16.5, 27.5, 1.6, 0xffffff, 0.8);
+    });
+    tex(scene, `e_tank_${id}`, 48, 48, (p) => {
+      p.ellipse(24, 41, 34, 9, BLACK, 0.5);
+      p.circle(24, 22, 20, BLACK).circle(24, 22, 18, c).circle(18, 14, 5, lt, 0.5);
+      p.circle(16, 17, 3.4, 0xffe066).circle(32, 17, 3.4, 0xffe066).circle(16, 17.5, 1.4, BLACK).circle(32, 17.5, 1.4, BLACK);
+      p.poly([[10, 26], [38, 26], [34, 36], [14, 36]], BLACK);
+      [14, 20, 26, 32].forEach((x) => p.poly([[x, 26], [x + 3, 26], [x + 1.5, 31]], 0xffffff));
+    });
+    tex(scene, `e_caster_${id}`, 40, 44, (p) => {
+      p.ellipse(18, 40, 22, 7, BLACK, 0.5);
+      p.poly([[18, 6], [32, 38], [4, 38]], BLACK).poly([[18, 9], [29, 36], [7, 36]], c);
+      p.circle(18, 14, 7.5, BLACK).circle(18, 14, 6, dk).circle(15.5, 14, 1.8, ac).circle(20.5, 14, 1.8, ac);
+      p.line(33, 12, 31, 38, BLACK, 4).line(33, 12, 31, 38, 0x8a6a4a, 2);
+      p.circle(33, 9, 6, ac, 0.35).circle(33, 9, 4.5, BLACK).circle(33, 9, 3.4, ac);
+    });
+    tex(scene, `e_bat_${id}`, 30, 26, (p) => {
+      p.ellipse(15, 23, 14, 4, BLACK, 0.4);
+      p.poly([[15, 11], [1, 3], [4, 18], [10, 14]], c, BLACK, 1.6).poly([[15, 11], [29, 3], [26, 18], [20, 14]], c, BLACK, 1.6);
+      p.circle(15, 13, 6.5, BLACK).circle(15, 13, 5.2, c).circle(13, 12, 1.5, ac).circle(17, 12, 1.5, ac);
+      p.poly([[11, 8], [12, 3], [14, 8]], c, BLACK, 1).poly([[16, 8], [18, 3], [19, 8]], c, BLACK, 1);
+    });
+    tex(scene, `e_bomb_${id}`, 34, 36, (p) => {
+      p.ellipse(17, 31, 22, 6, BLACK, 0.5);
+      p.circle(17, 20, 13.5, BLACK).circle(17, 20, 12, dk).circle(12, 15, 3.5, lt, 0.35);
+      p.path([[9, 17], [14, 21], [12, 26]], ac, 2).path([[22, 14], [20, 20], [25, 24]], ac, 2);
+      p.line(17, 8, 21, 3, BLACK, 3).circle(22, 3, 3.2, ac).circle(22, 3, 1.6, 0xffffff);
+      p.circle(13, 20, 2, ac).circle(21, 20, 2, ac);
+    });
+    tex(scene, `e_totem_${id}`, 36, 46, (p) => {
+      p.ellipse(18, 42, 28, 7, BLACK, 0.5);
+      p.poly([[6, 40], [8, 8], [28, 8], [30, 40]], BLACK).poly([[9, 38], [11, 11], [25, 11], [27, 38]], mix(c, 0x555566, 0.5));
+      p.poly([[5, 10], [18, 1], [31, 10]], BLACK).poly([[8, 9], [18, 4], [28, 9]], dk);
+      p.ellipse(18, 20, 12, 9, BLACK).circle(18, 20, 4.5, ac).circle(18, 20, 2, BLACK);
+      p.line(12, 29, 24, 29, ac, 2).line(14, 34, 22, 34, ac, 2);
+    });
+    tex(scene, `e_elite_${id}`, 64, 64, (p) => {
+      const ec = pal.elite;
+      p.ellipse(32, 55, 44, 11, BLACK, 0.5);
+      p.poly([[14, 28], [10, 4], [26, 16]], 0xffe066, BLACK, 2).poly([[50, 28], [54, 4], [38, 16]], 0xffe066, BLACK, 2);
+      p.circle(32, 33, 25, BLACK).circle(32, 33, 22.5, ec).circle(23, 24, 7, mix(ec, 0xffffff, 0.45), 0.55);
+      p.ring(32, 33, 22.5, 0xffffff, 2, 0.9);
+      p.ellipse(32, 31, 22, 15, 0xffffff).circle(32, 31, 6.5, 0xd7191c).circle(32, 31, 2.8, BLACK);
+      p.poly([[20, 45], [44, 45], [40, 52], [24, 52]], BLACK);
+    });
   });
   tex(scene, 'eshot', 18, 18, (p) => { p.circle(9, 9, 8.5, 0xff3b6b, 0.35).circle(9, 9, 6, BLACK).circle(9, 9, 4.8, 0xff6b81).circle(9, 9, 2.2, 0xffffff); });
   // ----- łup, XP, pociski -----
