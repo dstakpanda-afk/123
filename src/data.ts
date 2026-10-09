@@ -87,9 +87,15 @@ export interface ModeDef {
 }
 export const MODES: Record<ModeId, ModeDef> = {
   quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–3 min · 120 wrogów na mapie', target: 120, hpMul: 0.6, dmgMul: 0.6, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, free: false, size: 52, ramp: 0.4, color: 0x4ade80 },
-  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.9, dmgMul: 1.5, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, free: false, size: 76, ramp: 0.9, color: 0xff4d6d },
+  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.3, dmgMul: 1.1, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, free: false, size: 76, ramp: 0.9, color: 0xff4d6d },
   free: { name: 'TRYB WOLNY', desc: 'bez końca · kolejne piętra przez portal\nboss co 3. piętro, grasz dopóki chcesz', target: 130, hpMul: 0.85, dmgMul: 0.85, xpMul: 1, goldMul: 1.5, eliteEvery: 26, boss: false, free: true, size: 60, ramp: 0.6, color: 0xb18cff },
 };
+
+// ---------- poziomy zagrożenia (endgame): mnożą siłę wrogów i nagrody ----------
+export const MAX_TIER = 10;
+export const tierHp = (t: number): number => 1 + 0.45 * (t - 1);
+export const tierDmg = (t: number): number => 1 + 0.25 * (t - 1);
+export const tierReward = (t: number): number => 1 + 0.3 * (t - 1);
 
 // ---------- supporty ----------
 export type SupportId = 'multi' | 'power' | 'swift' | 'area' | 'pierce' | 'crit' | 'vamp' | 'chill' | 'echo' | 'burn' | 'knock' | 'focus';
@@ -155,8 +161,8 @@ export const BOSSES: BossDef[] = [
 export const BOSS_POINTS = 3;
 export const bossFor = (biome: string): BossDef => BOSSES.find((b) => b.biome === biome) ?? BOSSES[0];
 
-export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number; maxFloor: number }
-export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0, maxFloor: 0 };
+export interface Totals { kills: number; runs: number; wins: number; longWins: number; gems: number; legendary: number; maxSkill: number; maxFloor: number; tier: number; maxTier: number }
+export const NO_TOTALS: Totals = { kills: 0, runs: 0, wins: 0, longWins: 0, gems: 0, legendary: 0, maxSkill: 0, maxFloor: 0, tier: 1, maxTier: 1 };
 export interface Achievement { id: string; name: string; desc: string; pts: number; goal: number; value: (t: Totals, level: number) => number }
 export const ACHIEVEMENTS: Achievement[] = [
   { id: 'kill100', name: 'Pierwsza krew', desc: 'Pokonaj 100 wrogów', pts: 1, goal: 100, value: (t) => t.kills },

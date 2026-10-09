@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BOSS_POINTS, BossDef, bossFor, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
+import { BOSS_POINTS, BossDef, MAX_TIER, bossFor, tierDmg, tierHp, tierReward, MODES, Mods, ModeDef, ModeId, NO_MODS, SKILLS, SKILL_IDS, SUPPORTS, SUPPORT_IDS, SkillId, SkillKind, StatKey, Stats, SupportId, combineMods, xpNeed } from './data';
 import { countOf, skillBase } from './skills';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
@@ -13,7 +13,7 @@ interface Enemy {
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; boss: boolean; dead: boolean;
   kind: Kind; awake: boolean; pack: number; ph: number; hy: number;
   st: 'move' | 'wind' | 'dash' | 'rest' | 'channel'; stT: number; cd: number; ax: number; ay: number; act: string; stuck: number;
-  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number;
+  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number; p2: boolean; volT: number;
 }
 interface EShot { obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; dmg: number }
 interface Tele { x: number; y: number; R: number; t: number; t0: number; dmg: number; color: number }
@@ -38,7 +38,7 @@ export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
   private hp = 100;
   private invuln = 0;
-  time_ = 0; private kills = 0; private floorKills = 0; private floor = 1; private target = 0; private total = 0;
+  time_ = 0; private kills = 0; private floorKills = 0; private floor = 1; private target = 0; private total = 0; private tier = 1;
   private portal: { x: number; y: number } | null = null; private portalOpen = false; private busy = false; private mmImg: Phaser.GameObjects.Image | null = null; private regenAcc = 0;
   private xpGained = 0; private startLevel = 1;
   private bossDef: BossDef | null = null; private unlocked: string[] = [];
@@ -74,6 +74,7 @@ export class GameScene extends Phaser.Scene {
     this.char = getChar() as Character;
     this.char.recalc();
     this.mode = MODES[data?.mode ?? 'quick'];
+    this.tier = Math.max(1, Math.min(this.char.totals.maxTier, this.char.totals.tier));
     this.hp = this.char.maxHp;
     this.invuln = 0; this.time_ = 0; this.kills = 0; this.floorKills = 0; this.floor = 1; this.total = 0; this.regenAcc = 0; this.portal = null; this.portalOpen = false; this.busy = false; this.mmImg = null;
     this.xpGained = 0; this.startLevel = this.char.level; this.bossDef = null; this.unlocked = [];
@@ -390,7 +391,7 @@ export class GameScene extends Phaser.Scene {
       for (let i = 0; i < roster.length; i++) { r -= ws[i]; if (r <= 0) return roster[i]; }
       return roster[0];
     };
-    const nElite = md.eliteEvery > 0 ? Math.floor(this.target / md.eliteEvery) : 0;
+    const nElite = md.eliteEvery > 0 ? Math.floor((this.target / md.eliteEvery) * (1 + 0.2 * (this.tier - 1))) : 0;
     let left = this.target - nElite;
     let pack = 0;
     const depthOf = (i: number) => m.dist[i] / m.maxDist;
@@ -430,11 +431,12 @@ export class GameScene extends Phaser.Scene {
 
   private makeEnemy(kind: Kind, x: number, y: number, depth: number, pack: number, sum = false): Enemy {
     const L = this.char.level, bid = this.map.biome.id, fl = this.floor - 1;
-    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul * (1 + 0.12 * fl) * (sum ? 0.5 : 1);
-    const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul * (1 + 0.15 * depth) * (1 + 0.07 * fl);
-    const xpScale = (1 + 0.2 * (L - 1)) * this.mode.xpMul * (1 + 0.1 * fl);
+    const late = Math.max(0, L - 12), B = { h: 0.18, d: 0.09, lh: 0.02, ld: 0.015 };
+    const hpScale = (1 + B.h * (L - 1)) * (1 + B.lh * late) * tierHp(this.tier) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul * (1 + 0.12 * fl) * (sum ? 0.5 : 1);
+    const dmgScale = (1 + B.d * (L - 1)) * (1 + B.ld * late) * tierDmg(this.tier) * this.mode.dmgMul * (1 + 0.15 * depth) * (1 + 0.07 * fl);
+    const xpScale = (1 + 0.2 * (L - 1)) * tierReward(this.tier) * this.mode.xpMul * (1 + 0.1 * fl);
     let key = `e_elite_${bid}`, r = 22, hp = 150, speed = 50, dmg = 12, xp = 12, big = 1;
-    if (kind === 'boss' && this.bossDef) { key = `boss_${bid}`; r = 28 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
+    if (kind === 'boss' && this.bossDef) { key = `boss_${bid}`; r = 28 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 56; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
     else if (kind !== 'elite' && kind !== 'boss') { const a = ARCHS[kind]; key = `e_${a.shape}_${bid}`; r = a.r; hp = a.hp; speed = a.speed; dmg = a.dmg; xp = a.xp; }
     [x, y] = this.freeSpot(x, y, Math.min(r, 11) + 2);
     const obj = spr(this, x, y, key).setDepth(kind === 'boss' ? 6 : 5);
@@ -444,7 +446,7 @@ export class GameScene extends Phaser.Scene {
     const e: Enemy = {
       obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0,
       elite: kind === 'elite', boss: kind === 'boss', dead: false, kind, awake: false, pack, ph: Math.random() * 6.28, hy: y,
-      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0,
+      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0, p2: false, volT: 1.5,
     };
     this.enemies.push(e);
     return e;
@@ -818,7 +820,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------- łup ----------
   private rollDrop(e: Enemy): void {
-    const mult = 1 + this.st.drop, ilvl = 1 + Math.floor(this.char.level * 0.8) + (this.mode.boss ? 2 : 0);
+    const mult = (1 + this.st.drop) * tierReward(this.tier), ilvl = 1 + Math.floor(this.char.level * 0.8) + (this.mode.boss ? 2 : 0);
     const gem = () => (Math.random() < 0.3
       ? this.spawnDrop(e, undefined, Phaser.Utils.Array.GetRandom(SKILL_IDS))
       : this.spawnDrop(e, undefined, undefined, Phaser.Utils.Array.GetRandom(SUPPORT_IDS)));
@@ -981,7 +983,13 @@ export class GameScene extends Phaser.Scene {
         if (e.cd <= 0 && e.los && d < 300) this.windup(e, e.aff, e.aff === 'ring' ? 0.5 : 0.4, ux, uy);
         break;
       case 'boss': {
-        chase(e.speed);
+        chase(e.speed * (e.p2 ? 1.3 : 1));
+        e.volT -= dt;
+        if (e.volT <= 0 && e.los && d > 130) {
+          e.volT = e.p2 ? 1.1 : 1.8;
+          const a = Math.atan2(uy, ux);
+          for (let i = -1; i <= 1; i++) this.enemyShot(e, a + i * 0.22, 190, e.dmg * 0.35);
+        }
         const mv = this.bossDef?.moves ?? ['slam'];
         if (e.cd <= 0 && d < 400) { const act = mv[e.moveI++ % mv.length]; this.windup(e, act, act === 'slam' ? 0.9 : act === 'charge' ? 0.7 : act === 'summon' ? 0.9 : 0.55, ux, uy); }
         break;
@@ -1015,7 +1023,11 @@ export class GameScene extends Phaser.Scene {
         if (!e.awake) { e.obj.y = e.hy + Math.sin(this.time_ * 2 + e.ph) * 1.2; this.enemyBar(e, cam); continue; }
       }
 
-      e.cd -= dt; e.losT -= dt; if (e.stuck > 0) e.stuck -= dt;
+      e.cd -= dt * (e.p2 ? 1.4 : 1); e.losT -= dt; if (e.stuck > 0) e.stuck -= dt;
+      if (e.boss && !e.p2 && e.hp < e.maxHp * 0.5) {
+        e.p2 = true; e.cd = 0; this.toast(`${this.bossDef?.name ?? 'BOSS'}: FURIA!`, '#ff5470');
+        this.cameras.main.shake(300, 0.012);
+      }
       const dx = P.x - ex, dy = P.y - ey, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       if (e.losT <= 0) { e.losT = 0.15; e.los = this.clear(ex, ey, P.x, P.y, e.r > 14 ? 9 : 5); }
       const sf = e.frozenT > 0 ? 0 : e.slowT > 0 ? 0.5 : 1, rr = Math.min(e.r, 11);
@@ -1099,9 +1111,12 @@ export class GameScene extends Phaser.Scene {
     this.over = true; this.stick.clear();
     const c = this.char, md = this.mode;
     const gold = md.free
-      ? Math.floor((this.kills * 0.8 + 25 * (this.floor - 1)) * (1 + this.st.gold) * md.goldMul)
-      : Math.floor((this.kills * 0.8) * (1 + this.st.gold) * md.goldMul * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
+      ? Math.floor((this.kills * 0.8 + 25 * (this.floor - 1)) * (1 + this.st.gold) * md.goldMul * tierReward(this.tier))
+      : Math.floor((this.kills * 0.8) * (1 + this.st.gold) * md.goldMul * tierReward(this.tier) * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
     c.gold += gold; c.runs++; c.totals.runs++; if (win) { c.wins++; c.totals.wins++; if (md.boss) c.totals.longWins++; }
+    if (this.tier === c.totals.maxTier && c.totals.maxTier < MAX_TIER && ((win && !md.free) || (md.free && this.floor >= 4))) {
+      c.totals.maxTier++; this.unlocked.push(`Zagrożenie ${c.totals.maxTier} odblokowane`);
+    }
     this.checkAch();
     c.save();
     const w = W;

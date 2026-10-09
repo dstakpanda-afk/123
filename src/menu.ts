@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BOSS_POINTS, CLASSES, CLASS_IDS, MODES, ModeId, SKILLS, fmtShort, xpNeed } from './data';
+import { BOSS_POINTS, CLASSES, CLASS_IDS, MODES, MAX_TIER, ModeId, SKILLS, fmtShort, tierHp, tierReward, xpNeed } from './data';
 import { Character, getChar, setChar } from './char';
 import { H, S, W, hex, setupCam, spr } from './gfx';
 
@@ -28,23 +28,37 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(w / 2, 144, `Wyprawy: ${c.runs}   ·   Wygrane: ${c.wins}`, { fontSize: '12px', color: '#8f86b3' }).setOrigin(0.5);
 
     (['quick', 'long', 'free'] as ModeId[]).forEach((id, i) => {
-      const md = MODES[id], y = 184 + i * 62, tint = id === 'quick' ? 0x1d3d2c : id === 'long' ? 0x4a1f2b : 0x2c2350;
-      const r = this.add.rectangle(w / 2, y, 330, 56, tint).setStrokeStyle(3, md.color).setInteractive();
-      this.add.text(w / 2, y - 18, md.name, { fontSize: '16px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
+      const md = MODES[id], y = 182 + i * 58, tint = id === 'quick' ? 0x1d3d2c : id === 'long' ? 0x4a1f2b : 0x2c2350;
+      const r = this.add.rectangle(w / 2, y, 330, 52, tint).setStrokeStyle(3, md.color).setInteractive();
+      this.add.text(w / 2, y - 17, md.name, { fontSize: '15px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
       const desc = id === 'long' ? `ok. 4–6 min · 500 wrogów · ×2 XP, ×3 złota\nboss krainy · 1. pokonanie każdego: +${BOSS_POINTS} pkt` : id === 'free' ? `${md.desc}${c.totals.maxFloor ? `\nrekord: piętro ${c.totals.maxFloor}` : ''}` : md.desc;
-      this.add.text(w / 2, y + 8, desc, { fontSize: '11px', color: '#e4e9ff', align: 'center', lineSpacing: 1 }).setOrigin(0.5);
+      this.add.text(w / 2, y + 7, desc, { fontSize: '10px', color: '#e4e9ff', align: 'center', lineSpacing: 1 }).setOrigin(0.5);
       r.on('pointerup', () => this.scene.start('game', { mode: id }));
     });
+    {
+      const ty = 346, t = c.totals;
+      t.tier = Math.max(1, Math.min(t.maxTier, t.tier));
+      this.add.rectangle(w / 2, ty, 330, 26, 0x1b1530).setStrokeStyle(2, 0x6f5bc4);
+      const lbl = this.add.text(w / 2, ty, '', { fontSize: '12px', color: '#e6d6ff', fontStyle: 'bold' }).setOrigin(0.5);
+      const upd = () => lbl.setText(`ZAGROŻENIE ${t.tier}/${MAX_TIER}${t.tier > 1 ? `  ·  wrogowie ×${tierHp(t.tier).toFixed(1)}, nagrody ×${tierReward(t.tier).toFixed(1)}` : ''}`);
+      upd();
+      const arrow = (x: number, txt: string, d: number) => {
+        const r = this.add.rectangle(x, ty, 40, 26, 0x2a2150).setStrokeStyle(2, 0x8f6bd6).setInteractive();
+        this.add.text(x, ty, txt, { fontSize: '16px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
+        r.on('pointerup', () => { t.tier = Math.max(1, Math.min(t.maxTier, t.tier + d)); c.save(); upd(); });
+      };
+      arrow(36, '‹', -1); arrow(324, '›', 1);
+    }
     const pts = c.points > 0 ? ` (${c.points})` : '';
-    button(this, 95, 366, 156, 44, `DRZEWKO${pts}`, () => this.scene.start('tree'), c.points > 0 ? 0x2b5a3a : 0x22304f, c.points > 0 ? 0x4ade80 : 0x4d6bb3);
-    button(this, 265, 366, 156, 44, 'UMIEJĘTNOŚCI', () => this.scene.start('skills'));
-    button(this, 95, 414, 156, 44, 'EKWIPUNEK', () => this.scene.start('inv'));
-    button(this, 265, 414, 156, 44, 'HANDLARZ', () => this.scene.start('shop'));
+    button(this, 95, 392, 156, 44, `DRZEWKO${pts}`, () => this.scene.start('tree'), c.points > 0 ? 0x2b5a3a : 0x22304f, c.points > 0 ? 0x4ade80 : 0x4d6bb3);
+    button(this, 265, 392, 156, 44, 'UMIEJĘTNOŚCI', () => this.scene.start('skills'));
+    button(this, 95, 438, 156, 44, 'EKWIPUNEK', () => this.scene.start('inv'));
+    button(this, 265, 438, 156, 44, 'HANDLARZ', () => this.scene.start('shop'));
 
-    button(this, w / 2, 462, 330, 36, 'OSIĄGNIĘCIA I BOSSOWIE', () => this.scene.start('ach'), 0x3a3320, 0x9b8a4d, 14);
-    this.add.text(16, 490, 'Aktywny zestaw', { fontSize: '13px', color: '#8f86b3' });
+    button(this, w / 2, 484, 330, 34, 'OSIĄGNIĘCIA I BOSSOWIE', () => this.scene.start('ach'), 0x3a3320, 0x9b8a4d, 14);
+    this.add.text(16, 508, 'Aktywny zestaw', { fontSize: '13px', color: '#8f86b3' });
     c.loadout.forEach((l, i) => {
-      const x = 30 + i * 56, y = 534;
+      const x = 30 + i * 56, y = 552;
       this.add.rectangle(x + (i >= 3 ? 14 : 0), y, 46, 46, 0x120e24).setStrokeStyle(2, l.skill ? SKILLS[l.skill].color : 0x2a3050);
       if (l.skill) {
         spr(this, x + (i >= 3 ? 14 : 0), y - 2, `ic_${l.skill}`).setScale(40 / 44 / S);
@@ -53,7 +67,7 @@ export class MenuScene extends Phaser.Scene {
       const sups = l.sup.filter((x2) => !!x2).length;
       this.add.text(x + (i >= 3 ? 14 : 0), y + 34, `${sups}/${l.sup.length}`, { fontSize: '10px', color: '#8a82b4' }).setOrigin(0.5);
     });
-    this.add.text(16, 588, 'ataki  |  aury · wzmocnienia · słudzy', { fontSize: '11px', color: '#6f6896' });
+    this.add.text(16, 596, 'ataki  |  aury · wzmocnienia · słudzy', { fontSize: '11px', color: '#6f6896' });
 
     const reset = this.add.text(w / 2, 622, 'Nowa postać', { fontSize: '13px', color: '#8a82b4' }).setOrigin(0.5).setInteractive();
     let armed = false;
