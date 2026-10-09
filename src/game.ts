@@ -13,7 +13,7 @@ interface Enemy {
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; boss: boolean; dead: boolean;
   kind: Kind; awake: boolean; pack: number; ph: number; hy: number;
   st: 'move' | 'wind' | 'dash' | 'rest' | 'channel'; stT: number; cd: number; ax: number; ay: number; act: string; stuck: number;
-  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number; p2: boolean; volT: number;
+  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number; sum: boolean; emitT: number; p2: boolean; volT: number; kx: number; ky: number;
 }
 interface EShot { obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; dmg: number }
 interface Tele { x: number; y: number; R: number; t: number; t0: number; dmg: number; color: number }
@@ -446,7 +446,7 @@ export class GameScene extends Phaser.Scene {
     const e: Enemy = {
       obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0,
       elite: kind === 'elite', boss: kind === 'boss', dead: false, kind, awake: false, pack, ph: Math.random() * 6.28, hy: y,
-      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0, p2: false, volT: 1.5,
+      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0, sum, emitT: 0, p2: false, volT: 1.5, kx: 0, ky: 0,
     };
     this.enemies.push(e);
     return e;
@@ -624,7 +624,7 @@ export class GameScene extends Phaser.Scene {
           this.hurt(e, dmg, m);
           if (!e.dead && !e.boss) {
             const a = Math.atan2(P.y - e.obj.y, P.x - e.obj.x);
-            this.slide(e.obj, Math.cos(a) * 28, Math.sin(a) * 28, Math.min(e.r, 10));
+            e.kx += Math.cos(a) * 340; e.ky += Math.sin(a) * 340;
           }
         });
         this.tweens.add({ targets: g, alpha: 0, duration: 220, onComplete: () => g.destroy() });
@@ -775,7 +775,7 @@ export class GameScene extends Phaser.Scene {
     if (e.hp <= 0) return this.kill(e);
     if (m.knock > 0 && !e.boss) {
       const a = Math.atan2(e.obj.y - this.player.y, e.obj.x - this.player.x);
-      this.slide(e.obj, Math.cos(a) * 18, Math.sin(a) * 18, Math.min(e.r, 10));
+      e.kx += Math.cos(a) * 220; e.ky += Math.sin(a) * 220;
     }
   }
 
@@ -1015,6 +1015,12 @@ export class GameScene extends Phaser.Scene {
       else if (e.elite && e.aff === 'quake') e.obj.setTint(0xc77dff);
       else e.obj.clearTint();
 
+      if (e.kx || e.ky) {
+        this.slide(e.obj, e.kx * dt, e.ky * dt, Math.min(e.r, 10));
+        const k = Math.exp(-12 * dt); e.kx *= k; e.ky *= k;
+        if (Math.abs(e.kx) + Math.abs(e.ky) < 8) { e.kx = 0; e.ky = 0; }
+        e.hy = e.obj.y;
+      }
       if (!e.awake) {
         if ((ex - P.x) ** 2 + (ey - P.y) ** 2 < 420 * 420) {
           const fl = this.flow[this.tileOf(e.obj)];
