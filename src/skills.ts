@@ -70,7 +70,7 @@ const PIERCE_SKILLS: SkillId[] = ['bolt', 'lance', 'swarm', 'chain', 'm_eye'];
 const ARCH_COUNT: Record<Arch, string> = { proj: 'pociski', cone: 'odłamki', beam: 'promienie', nova: 'fale', blast: 'wybuchy', zone: 'strefy', chain: 'skoki', arc: 'cięcia', orbit: 'orby', boom: 'bumerangi', home: 'widma', trap: 'miny', line: 'wybuchy w linii', ring: 'pociski', totem: 'totemy' };
 const ARCH_RANGE: Partial<Record<Arch, string>> = { nova: 'Promień fali', blast: 'Promień wybuchu', zone: 'Promień strefy', arc: 'Zasięg cięcia', orbit: 'Promień orbity', boom: 'Zasięg lotu', trap: 'Promień miny', line: 'Promień wybuchu', totem: 'Zasięg totemu' };
 const AREA_ARCH: Arch[] = ['nova', 'blast', 'zone', 'arc', 'orbit', 'trap', 'line', 'totem', 'beam'];
-const PIERCE_ARCH: Arch[] = ['proj', 'cone', 'ring', 'home'];
+const PIERCE_ARCH: Arch[] = ['proj', 'cone', 'ring', 'home', 'chain'];
 const archOf = (id: SkillId): Arch | undefined => SKILLS[id]?.arch;
 const countLabel = (id: SkillId): string | undefined => COUNT_LABEL[id] ?? (archOf(id) ? ARCH_COUNT[archOf(id) as Arch] : undefined);
 const rangeLabel = (id: SkillId): string | undefined => RANGE_LABEL[id] ?? ARCH_RANGE[archOf(id) as Arch];
@@ -212,4 +212,25 @@ export function pickGem(owned: Record<string, number>, level: number): SkillId {
   const fresh = ids.filter((id) => !owned[id]), up = ids.filter((id) => owned[id] > 0 && owned[id] < MAX_SKILL);
   const pool = fresh.length && (Math.random() < 0.6 || !up.length) ? fresh : up.length ? up : ids;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** które mody są "głównym" efektem supportu (gem musi je wykorzystywać, by support miał sens) */
+export function supportNeeds(sup: SupportId): (keyof Mods)[] {
+  const def = SUPPORTS[sup];
+  if (def.needs) return def.needs;
+  const keys = (Object.keys(def.mods) as (keyof Mods)[]).filter((k) => k !== 'dmg' && k !== 'cd');
+  if (keys.length) return keys;
+  return (Object.keys(def.mods) as (keyof Mods)[]).includes('cd') && !def.mods.dmg ? ['cd'] : [];
+}
+export function supportFits(id: SkillId, sup: SupportId): boolean {
+  const need = supportNeeds(sup);
+  if (!need.length) return true;
+  if (need.length === 1 && need[0] === 'cd') return modApplies(id, 'cd');
+  return need.every((k) => modApplies(id, k));
+}
+const NEED_TEXT: Partial<Record<keyof Mods, string>> = { area: 'obszar działania', proj: 'dodatkowe pociski/cele', pierce: 'przebicie', crit: 'trafienia (krytyk)', steal: 'trafienia (kradzież życia)', slow: 'trafienia (spowolnienie)', burn: 'trafienia (podpalenie)', knock: 'trafienia (odrzut)', echo: 'powtarzanie ataku', cd: 'czas odnowienia' };
+/** krótkie wyjaśnienie, dlaczego support nie pasuje */
+export function supportWhy(id: SkillId, sup: SupportId): string {
+  const bad = supportNeeds(sup).filter((k) => !modApplies(id, k)).map((k) => NEED_TEXT[k] ?? k);
+  return bad.length ? `gem nie używa: ${bad.join(', ')}` : '';
 }

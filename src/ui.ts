@@ -5,7 +5,8 @@ import { BAG_SIZE, Character, getChar } from './char';
 import { Item, RARITY_COLOR, RARITY_NAME, SLOTS, SLOT_NAME, makeItem, sellValue } from './items';
 import { CLASS_START, KR, NODES, NODE_LIST, R, SECTORS, TreeNode, sectorColor } from './tree';
 import { H, S, W, hex, setupCam, spr } from './gfx';
-import { describeSkill, pickGem } from './skills';
+import { describeSkill, pickGem, supportFits, supportWhy } from './skills';
+import { TAG_COLOR, TAG_ORDER, tagsOf } from './tags';
 import { LOGIN_REWARDS, QUESTS } from './daily';
 
 function btn(scene: Phaser.Scene, x: number, y: number, w: number, h: number, label: string, cb: () => void, fill = 0x22304f, stroke = 0x4d6bb3, size = 14): Phaser.GameObjects.GameObject[] {
@@ -251,7 +252,7 @@ export class SkillsScene extends Phaser.Scene {
   private sel: Sel = null;
   private note = '';
   private view: 'list' | 'summary' = 'list';
-  private page = 0; private pageKey = '';
+  private page = 0; private pageKey = ''; private tag: string | null = null; private showAll = false;
   private layer!: Phaser.GameObjects.Container;
 
   constructor() { super('skills'); }
@@ -301,7 +302,7 @@ export class SkillsScene extends Phaser.Scene {
     if (sel) {
       const lo = c.loadout[sel.slot];
       if (sel.idx === null) {
-        if (lo.skill) { detail = `${SKILLS[lo.skill].name} (${KIND_NAME[SKILLS[lo.skill].kind]}, poz. ${c.skills[lo.skill]}/${MAX_SKILL})\n${SKILLS[lo.skill].desc}`; canRemove = true; }
+        if (lo.skill) { detail = `${SKILLS[lo.skill].name} (${KIND_NAME[SKILLS[lo.skill].kind]}, poz. ${c.skills[lo.skill]}/${MAX_SKILL})\n${SKILLS[lo.skill].desc}\nTagi: ${tagsOf(lo.skill).join(', ')}`; canRemove = true; }
         else detail = this.note || (sel.slot < 3 ? 'Pusty slot. Wybierz atak z listy.' : 'Pusty slot. Wybierz aurę, wzmocnienie lub sługę.');
       } else {
         const sid = lo.sup[sel.idx];
@@ -317,11 +318,11 @@ export class SkillsScene extends Phaser.Scene {
 
     // lista gemów
     const showSupports = !!sel && sel.idx !== null;
-    this.put(this.add.text(12, 398, showSupports ? 'Twoje supporty (dotknij, aby włożyć)' : (sel ? (sel.slot < 3 ? 'Twoje ataki (dotknij, aby włożyć)' : 'Twoje gemy pomocnicze (dotknij, aby włożyć)') : 'Twoje gemy'), { fontSize: '12px', color: '#a8b0d0' }));
+    this.put(this.add.text(12, 398, showSupports ? 'Twoje supporty' : (sel ? (sel.slot < 3 ? 'Twoje ataki' : 'Gemy pomocnicze') : 'Twoje gemy'), { fontSize: '12px', color: '#a8b0d0' }));
     const cell = (i: number) => ({ x: 48 + (i % 4) * 88, y: 450 + Math.floor(i / 4) * 70 });
     const PER = 12;
     const key = showSupports ? 's' : sel ? (sel.slot < 3 ? 'a' : 'u') : 'all';
-    if (key !== this.pageKey) { this.pageKey = key; this.page = 0; }
+    if (key !== this.pageKey) { this.pageKey = key; this.page = 0; this.tag = null; this.showAll = false; }
     const nav = (total: number) => {
       const pages = Math.max(1, Math.ceil(total / PER));
       this.page = Math.min(this.page, pages - 1);
@@ -332,30 +333,46 @@ export class SkillsScene extends Phaser.Scene {
       }
     };
     if (showSupports) {
-      const owned = SUPPORT_IDS.map((id) => ({ id, n: c.supportBag.filter((s) => s === id).length })).filter((o) => o.n > 0);
-      if (!owned.length) this.put(this.add.text(W / 2, 480, 'Nie masz supportów.\nZnajdziesz je w łupie lub kupisz u handlarza.', { fontSize: '13px', color: '#8a82b4', align: 'center' }).setOrigin(0.5));
-      nav(owned.length);
-      owned.slice(this.page * PER, (this.page + 1) * PER).forEach((o, i) => {
+      const gem = sel ? c.loadout[sel.slot].skill : null;
+      const owned = SUPPORT_IDS.map((id) => ({ id, n: c.supportBag.filter((s) => s === id).length })).filter((o) => o.n > 0)
+        .map((o) => ({ ...o, fit: !gem || supportFits(gem, o.id) }));
+      const hidden = owned.filter((o) => !o.fit).length;
+      const shown = owned.filter((o) => o.fit || this.showAll).sort((a, b) => Number(b.fit) - Number(a.fit));
+      if (!gem) this.put(this.add.text(W / 2, 480, 'Najpierw włóż gem do tego slotu,\npotem dobierz supporty.', { fontSize: '13px', color: '#8a82b4', align: 'center' }).setOrigin(0.5));
+      else if (!owned.length) this.put(this.add.text(W / 2, 480, 'Nie masz supportów.\nZnajdziesz je w łupie lub kupisz u handlarza.', { fontSize: '13px', color: '#8a82b4', align: 'center' }).setOrigin(0.5));
+      else if (!shown.length) this.put(this.add.text(W / 2, 480, 'Żaden support z torby nie pasuje do tego gemu.\nDotknij „Niepasujące”, aby zobaczyć dlaczego.', { fontSize: '12px', color: '#8a82b4', align: 'center' }).setOrigin(0.5));
+      if (hidden) this.put(btn(this, 178, 404, 122, 24, this.showAll ? 'Ukryj niepasujące' : `+${hidden} niepasujące`, () => { this.showAll = !this.showAll; this.render(); }, 0x22304f, 0x4d6bb3, 11));
+      nav(shown.length);
+      shown.slice(this.page * PER, (this.page + 1) * PER).forEach((o, i) => {
         const { x, y } = cell(i), d = SUPPORTS[o.id];
-        this.tile(x, y, 84, 64, d.color, false, () => {
-          if (sel && sel.idx !== null) { c.setSupport(sel.slot, sel.idx, o.id); c.save(); this.note = `Włożono: ${d.name}`; } else this.note = `${d.name}: ${d.desc}`;
+        this.tile(x, y, 84, 64, o.fit ? d.color : 0x3a3a4a, false, () => {
+          if (!o.fit) { this.note = `${d.name} nie pasuje: ${gem ? supportWhy(gem, o.id) : ''}`; this.render(); return; }
+          if (sel && sel.idx !== null) { this.note = c.setSupport(sel.slot, sel.idx, o.id) ? `Włożono: ${d.name}` : 'Ten support tu nie pasuje.'; c.save(); } else this.note = `${d.name}: ${d.desc}`;
           this.render();
         });
-        this.put(this.add.text(x - 36, y - 14, d.short, { fontSize: '18px', color: hex(d.color), fontStyle: 'bold' }).setOrigin(0, 0.5));
-        this.put(this.add.text(x + 38, y - 24, `×${o.n}`, { fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0));
-        this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: '#e4e9ff', align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
+        const al = o.fit ? 1 : 0.35;
+        this.put(this.add.text(x - 36, y - 14, d.short, { fontSize: '18px', color: hex(d.color), fontStyle: 'bold' }).setOrigin(0, 0.5).setAlpha(al));
+        this.put(this.add.text(x + 38, y - 24, `×${o.n}`, { fontSize: '12px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0).setAlpha(al));
+        this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: '#e4e9ff', align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5).setAlpha(al));
       });
     } else {
-      const ids = (sel ? (sel.slot < 3 ? ATTACK_IDS : UTILITY_IDS) : SKILL_IDS).filter((id) => c.skills[id] > 0).sort((a, b) => c.skills[b] - c.skills[a]);
+      const base = (sel ? (sel.slot < 3 ? ATTACK_IDS : UTILITY_IDS) : SKILL_IDS).filter((id) => c.skills[id] > 0);
+      const present = TAG_ORDER.filter((t) => base.some((id) => tagsOf(id).includes(t)));
+      if (this.tag && !present.includes(this.tag as never)) this.tag = null;
+      const ids = base.filter((id) => !this.tag || tagsOf(id).includes(this.tag)).sort((a, b) => c.skills[b] - c.skills[a]);
+      this.put(btn(this, 178, 404, 122, 24, this.tag ? `Tag: ${this.tag} ›` : 'Tag: wszystkie ›', () => {
+        const order: (string | null)[] = [null, ...present];
+        this.tag = order[(order.indexOf(this.tag) + 1) % order.length]; this.page = 0; this.render();
+      }, 0x22304f, this.tag ? (TAG_COLOR[this.tag] ?? 0x4d6bb3) : 0x4d6bb3, 11));
       nav(ids.length);
       ids.slice(this.page * PER, (this.page + 1) * PER).forEach((id, i) => {
-        const { x, y } = cell(i), d = SKILLS[id];
+        const { x, y } = cell(i), d = SKILLS[id], tg = tagsOf(id), el = tg.find((t) => TAG_COLOR[t]);
         this.tile(x, y, 84, 64, d.color, false, () => {
-          if (sel && sel.idx === null) { c.setSkill(sel.slot, id); c.save(); this.note = ''; this.view = 'summary'; } else this.note = `${d.name}: ${d.desc}`;
+          if (sel && sel.idx === null) { c.setSkill(sel.slot, id); c.save(); this.note = ''; this.view = 'summary'; } else this.note = `${d.name}: ${d.desc}\nTagi: ${tg.join(', ')}`;
           this.render();
         });
         this.put(spr(this, x - 22, y - 14, `ic_${id}`).setScale(30 / 44 / S));
-        this.put(this.add.text(x + 38, y - 26, KIND_NAME[d.kind], { fontSize: '10px', color: '#a8b0d0' }).setOrigin(1, 0));
+        this.put(this.add.text(x + 38, y - 26, el ?? KIND_NAME[d.kind], { fontSize: '10px', color: el ? hex(TAG_COLOR[el]) : '#a8b0d0' }).setOrigin(1, 0));
         this.put(this.add.text(x + 38, y - 13, `poz. ${c.skills[id]}`, { fontSize: '11px', color: '#fff', fontStyle: 'bold' }).setOrigin(1, 0));
         this.put(this.add.text(x, y + 15, d.name, { fontSize: '10px', color: hex(d.color), align: 'center', wordWrap: { width: 80 } }).setOrigin(0.5));
       });
@@ -371,7 +388,8 @@ export class SkillsScene extends Phaser.Scene {
     this.put(spr(this, 34, 84, `ic_${id}`).setScale(48 / 44 / S));
     this.put(this.add.text(68, 66, sm.title, { fontSize: '18px', color: hex(sm.color), fontStyle: 'bold' }));
     this.put(this.add.text(68, 90, `${sm.kind} · poziom ${sm.level}/${MAX_SKILL}`, { fontSize: '12px', color: '#a8b0d0' }));
-    this.put(this.add.text(12, 116, sm.desc, { fontSize: '12px', color: '#d6d0ee', wordWrap: { width: 336 } }));
+    this.put(this.add.text(68, 102, tagsOf(id).join(' · '), { fontSize: '10px', color: '#8fa9ff', wordWrap: { width: 280 } }));
+    this.put(this.add.text(12, 120, sm.desc, { fontSize: '12px', color: '#d6d0ee', wordWrap: { width: 336 } }));
     this.put(this.add.text(12, 148, 'Efekt końcowy (z postacią i supportami)', { fontSize: '11px', color: '#8f86b3' }));
     let y = 168;
     sm.lines.forEach(([k, v]) => {

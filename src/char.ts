@@ -1,5 +1,5 @@
 import { LOGIN_REWARDS, QUESTS, DailyState, Track, newDaily, refreshDaily } from './daily';
-import { pickGem } from './skills';
+import { pickGem, supportFits } from './skills';
 import { ACHIEVEMENTS, Achievement, BOSS_POINTS, BASE_STATS, CLASSES, ClassId, MAX_SKILL, NO_TOTALS, SKILLS, SKILL_IDS, SUPPORT_IDS, SUPPORTS, SkillId, StatKey, Stats, SupportId, Totals, xpNeed } from './data';
 import { Item, Slot, itemScore, makeItem, sellValue, syncUid } from './items';
 import { CLASS_START, NODES, TREE_VERSION } from './tree';
@@ -187,14 +187,28 @@ export class Character {
   }
   setSkill(slot: number, id: SkillId | null): void {
     if (id && (SKILLS[id].kind === 'attack') !== (slot < MAIN_SLOTS)) return;
-    if (id) this.loadout.forEach((l) => { if (l.skill === id) l.skill = null; });
+    if (id) this.loadout.forEach((l, i) => { if (l.skill === id) { l.skill = null; this.sanitize(i); } });
     this.loadout[slot].skill = id;
+    this.sanitize(slot);
   }
-  setSupport(slot: number, idx: number, id: SupportId | null): void {
+  /** support, który nie pasuje do gemu w slocie, wraca do torby */
+  sanitize(slot?: number): void {
+    this.loadout.forEach((lo, i) => {
+      if (slot !== undefined && i !== slot) return;
+      lo.sup.forEach((sup, j) => {
+        if (!sup || (lo.skill && supportFits(lo.skill, sup))) return;
+        if (this.supportBag.length < SUPPORT_BAG) this.supportBag.push(sup); else this.gold += 15;
+        lo.sup[j] = null;
+      });
+    });
+  }
+  setSupport(slot: number, idx: number, id: SupportId | null): boolean {
     const lo = this.loadout[slot], cur = lo.sup[idx];
-    if (id) { const at = this.supportBag.indexOf(id); if (at < 0) return; this.supportBag.splice(at, 1); }
+    if (id && (!lo.skill || !supportFits(lo.skill, id))) return false;
+    if (id) { const at = this.supportBag.indexOf(id); if (at < 0) return false; this.supportBag.splice(at, 1); }
     if (cur) this.supportBag.push(cur);
     lo.sup[idx] = id;
+    return true;
   }
 
   // ---------- przedmioty ----------
@@ -259,6 +273,7 @@ export class Character {
       c.totals.disc = SKILL_IDS.filter((x) => c.skills[x] > 0).length;
       c.supportBag = (d.supportBag as SupportId[]).filter((s) => SUPPORT_IDS.includes(s));
       c.loadout = newLoadout().map((blank, i) => ({ skill: d.loadout?.[i]?.skill ?? null, sup: blank.sup.map((_, j) => d.loadout?.[i]?.sup?.[j] ?? null) }));
+      c.sanitize();
       c.equipped = d.equipped ?? {}; c.bag = d.bag ?? [];
       syncUid([...Object.values(c.equipped).filter((i): i is Item => !!i), ...c.bag]);
       c.recalc();

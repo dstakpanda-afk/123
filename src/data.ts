@@ -112,10 +112,10 @@ export type SupportId = string;
 /** dmg, cd, area mnożą się; reszta sumuje */
 export interface Mods { dmg: number; cd: number; area: number; proj: number; pierce: number; crit: number; steal: number; slow: number; burn: number; knock: number; echo: number }
 export const NO_MODS: Mods = { dmg: 1, cd: 1, area: 1, proj: 0, pierce: 0, crit: 0, steal: 0, slow: 0, burn: 0, knock: 0, echo: 0 };
-export interface SupportDef { name: string; short: string; desc: string; color: number; mods: Partial<Mods> }
+export interface SupportDef { name: string; short: string; desc: string; color: number; mods: Partial<Mods>; needs?: (keyof Mods)[] }
 export const SUPPORTS: Record<SupportId, SupportDef> = {
-  brutal: { name: 'Brutalność', short: 'Br', desc: '+40% obrażeń, +30% odnowienia, odrzut', color: 0xd9824a, mods: { dmg: 1.4, cd: 1.3, knock: 1 } },
-  rapid: { name: 'Gorączka', short: 'Gr', desc: '-35% odnowienia, -25% obrażeń', color: 0xffb347, mods: { cd: 0.65, dmg: 0.75 } },
+  brutal: { name: 'Brutalność', short: 'Br', desc: '+40% obrażeń, +30% odnowienia, odrzut', color: 0xd9824a, mods: { dmg: 1.4, cd: 1.3, knock: 1 }, needs: [] },
+  rapid: { name: 'Gorączka', short: 'Gr', desc: '-35% odnowienia, -25% obrażeń', color: 0xffb347, mods: { cd: 0.65, dmg: 0.75 }, needs: ['cd'] },
   volley: { name: 'Salwa', short: 'Sl', desc: '+3 pociski/cele, -35% obrażeń, +15% odnowienia', color: 0x5fe8c8, mods: { proj: 3, dmg: 0.65, cd: 1.15 } },
   inferno: { name: 'Żar', short: 'Żr', desc: 'Podpala 70% obrażeń przez 3 s, +10% obrażeń', color: 0xff7a3d, mods: { burn: 0.7, dmg: 1.1 } },
   permafrost: { name: 'Wieczny Mróz', short: 'Mz', desc: 'Spowalnia na 3 s, +10% obrażeń, +10% odnowienia', color: 0x8fd3ff, mods: { slow: 3, dmg: 1.1, cd: 1.1 } },
@@ -123,11 +123,11 @@ export const SUPPORTS: Record<SupportId, SupportDef> = {
   leech: { name: 'Krwiopijca', short: 'Kp', desc: '+8% kradzieży życia, -15% obrażeń', color: 0xc0314f, mods: { steal: 0.08, dmg: 0.85 } },
   reach: { name: 'Zasięg', short: 'Zs', desc: '+60% obszaru, -15% obrażeń, +10% odnowienia', color: 0x6fa8ff, mods: { area: 1.6, dmg: 0.85, cd: 1.1 } },
   ricochet: { name: 'Rykoszet', short: 'Ry', desc: 'Przebija +4 wrogów, piorun +4 skoki, -10% obrażeń', color: 0xb98cff, mods: { pierce: 4, dmg: 0.9 } },
-  overload: { name: 'Przeciążenie', short: 'Pz', desc: '+80% obrażeń, +50% odnowienia, -20% obszaru', color: 0xff5470, mods: { dmg: 1.8, cd: 1.5, area: 0.8 } },
+  overload: { name: 'Przeciążenie', short: 'Pz', desc: '+80% obrażeń, +50% odnowienia, -20% obszaru', color: 0xff5470, mods: { dmg: 1.8, cd: 1.5, area: 0.8 }, needs: [] },
   twin: { name: 'Bliźniak', short: 'Bl', desc: 'Powtarza się (70%), +1 pocisk, -10% obrażeń', color: 0xa8e0ff, mods: { echo: 1, proj: 1, dmg: 0.9 } },
   multi: { name: 'Wielokrotność', short: 'Wk', desc: '+2 pociski/cele/oczy/cięcia. -20% obrażeń', color: 0x4ff0d2, mods: { proj: 2, dmg: 0.8 } },
-  power: { name: 'Zwiększona Moc', short: 'Mc', desc: '+30% obrażeń, +10% czasu odnowienia', color: 0xff6b81, mods: { dmg: 1.3, cd: 1.1 } },
-  swift: { name: 'Pośpiech', short: 'Pś', desc: '-25% czasu odnowienia, -10% obrażeń', color: 0xffd36b, mods: { cd: 0.75, dmg: 0.9 } },
+  power: { name: 'Zwiększona Moc', short: 'Mc', desc: '+30% obrażeń, +10% czasu odnowienia', color: 0xff6b81, mods: { dmg: 1.3, cd: 1.1 }, needs: [] },
+  swift: { name: 'Pośpiech', short: 'Pś', desc: '-25% czasu odnowienia, -10% obrażeń', color: 0xffd36b, mods: { cd: 0.75, dmg: 0.9 }, needs: ['cd'] },
   area: { name: 'Rozległość', short: 'Rz', desc: '+35% obszaru, -10% obrażeń', color: 0x7fb7ff, mods: { area: 1.35, dmg: 0.9 } },
   pierce: { name: 'Przebicie', short: 'Pb', desc: 'Pociski przebijają +2 wrogów, piorun +2 skoki', color: 0xc77dff, mods: { pierce: 2 } },
   crit: { name: 'Śmiertelny Cios', short: 'Kr', desc: '+15% szansy na krytyk, -10% obrażeń', color: 0xffe066, mods: { crit: 0.15, dmg: 0.9 } },
@@ -136,7 +136,7 @@ export const SUPPORTS: Record<SupportId, SupportDef> = {
   echo: { name: 'Echo', short: 'Ec', desc: 'Umiejętność powtarza się po chwili (70% obrażeń), +10% odnowienia', color: 0xb58cff, mods: { echo: 1, cd: 1.1 } },
   burn: { name: 'Podpalenie', short: 'Pd', desc: 'Trafienia podpalają: 40% obrażeń przez 3 s', color: 0xff9a4d, mods: { burn: 0.4 } },
   knock: { name: 'Odrzut', short: 'Od', desc: 'Trafienia odpychają wrogów', color: 0xe8dcc0, mods: { knock: 1 } },
-  focus: { name: 'Koncentracja', short: 'Kn', desc: '+50% obrażeń, -30% obszaru, +20% odnowienia', color: 0xf1a7ff, mods: { dmg: 1.5, area: 0.7, cd: 1.2 } },
+  focus: { name: 'Koncentracja', short: 'Kn', desc: '+50% obrażeń, -30% obszaru, +20% odnowienia', color: 0xf1a7ff, mods: { dmg: 1.5, area: 0.7, cd: 1.2 }, needs: [] },
 };
 export const SUPPORT_IDS = Object.keys(SUPPORTS) as SupportId[];
 export function combineMods(ids: (SupportId | null)[]): Mods {
