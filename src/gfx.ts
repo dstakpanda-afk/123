@@ -135,6 +135,13 @@ export function makeTextures(scene: Phaser.Scene): void {
     p.ellipse(32, 31, 22, 15, 0xffffff).circle(32, 31, 6.5, 0xd7191c).circle(32, 31, 2.8, BLACK);
     p.poly([[20, 45], [44, 45], [40, 52], [24, 52]], BLACK);
   });
+  tex(scene, 'e_spit', 36, 36, (p) => {
+    p.ellipse(18, 31, 22, 7, BLACK, 0.5);
+    p.poly([[18, 2], [31, 24], [5, 24]], BLACK).poly([[18, 5], [28, 23], [8, 23]], 0x3b7a6b);
+    p.ellipse(18, 17, 12, 9, BLACK).circle(14.5, 17, 2.2, 0xb7ff5a).circle(21.5, 17, 2.2, 0xb7ff5a);
+    p.circle(18, 29, 6, BLACK).circle(18, 29, 4.6, 0xb7ff5a).circle(16.5, 27.5, 1.6, 0xffffff, 0.8);
+  });
+  tex(scene, 'eshot', 18, 18, (p) => { p.circle(9, 9, 8.5, 0xff3b6b, 0.35).circle(9, 9, 6, BLACK).circle(9, 9, 4.8, 0xff6b81).circle(9, 9, 2.2, 0xffffff); });
   // ----- łup, XP, pociski -----
   tex(scene, 'xp', 16, 16, (p) => { p.poly([[8, 1], [14, 8], [8, 15], [2, 8]], 0x8fe3ff, BLACK, 1.8).poly([[8, 4], [11, 8], [8, 6.5]], 0xffffff); });
   tex(scene, 'drop_item', 26, 26, (p) => { p.poly([[13, 1], [25, 13], [13, 25], [1, 13]], 0xffffff, BLACK, 2.5).poly([[13, 6], [20, 13], [13, 20], [6, 13]], 0xdddddd).poly([[13, 5], [17, 9], [13, 8]], 0xffffff); });

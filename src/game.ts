@@ -4,11 +4,18 @@ import { countOf, skillBase } from './skills';
 import { Character, getChar } from './char';
 import { RARITY_COLOR, Item, makeItem } from './items';
 import { H, S, W, setupCam, spr } from './gfx';
+import { GameMap, TILE, bfs, buildMapImages, generateMap } from './map';
 
+type Kind = 'grunt' | 'runner' | 'spitter' | 'brute' | 'elite' | 'boss';
 interface Enemy {
   obj: Phaser.GameObjects.Image; hp: number; maxHp: number; speed: number; dmg: number; r: number; xp: number;
   hitT: number; slowT: number; frozenT: number; burnT: number; burnDps: number; elite: boolean; boss: boolean; dead: boolean;
+  kind: Kind; awake: boolean; pack: number; ph: number; hy: number;
+  st: 'move' | 'wind' | 'dash' | 'rest'; stT: number; cd: number; ax: number; ay: number; act: string; stuck: number;
+  los: boolean; losT: number; aff: 'ring' | 'quake'; moveI: number;
 }
+interface EShot { obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; dmg: number }
+interface Tele { x: number; y: number; R: number; t: number; t0: number; dmg: number; color: number }
 interface Shot {
   obj: Phaser.GameObjects.Image; vx: number; vy: number; life: number; pierce: number; dmg: number; hit: Set<Enemy>; m: Mods;
   kind: 'normal' | 'boom' | 'home'; travelled: number; maxDist: number; back: boolean; spd: number;
@@ -21,7 +28,7 @@ interface SkillState {
   orbs: Phaser.GameObjects.Image[]; angle: number; minions: Minion[];
 }
 
-const ENEMY_CAP = 160;
+const WAKE_STEPS = 8;
 
 export class GameScene extends Phaser.Scene {
   private char!: Character;
@@ -30,14 +37,21 @@ export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Image;
   private hp = 100;
   private invuln = 0;
-  time_ = 0; private kills = 0; private spawned = 0; private spawnT = 0; private nextElite = 0; private regenAcc = 0;
-  private bossSpawned = false; private bossDead = false; private xpGained = 0; private startLevel = 1;
+  time_ = 0; private kills = 0; private total = 0; private regenAcc = 0;
+  private xpGained = 0; private startLevel = 1;
   private bossDef: BossDef | null = null; private unlocked: string[] = [];
   private enemies: Enemy[] = []; private shots: Shot[] = []; private zones: Zone[] = []; private drops: Drop[] = [];
   private states: SkillState[] = [];
   private fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
   private over = false; private popCount = 0; private fxCount = 0; private found = 0;
-  private bg!: Phaser.GameObjects.TileSprite;
+  private map!: GameMap;
+  private mapView: { destroy: () => void } | null = null;
+  private flow = new Int16Array(0); private flowKey = -1; private flowT = 0;
+  private packs: Enemy[][] = [];
+  private eshots: EShot[] = []; private teles: Tele[] = [];
+  private tgfx!: Phaser.GameObjects.Graphics;
+  private seen = new Uint8Array(0); private mmDirty = false; private mmT = 0;
+  private mmCanvas: Phaser.Textures.CanvasTexture | null = null;
   private stick!: Phaser.GameObjects.Graphics;
   private stickOrigin: Phaser.Math.Vector2 | null = null;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -58,19 +72,29 @@ export class GameScene extends Phaser.Scene {
     this.char.recalc();
     this.mode = MODES[data?.mode ?? 'quick'];
     this.hp = this.char.maxHp;
-    this.invuln = 0; this.time_ = 0; this.kills = 0; this.spawned = 0; this.spawnT = 0.3; this.nextElite = this.mode.eliteEvery; this.regenAcc = 0;
-    this.bossSpawned = false; this.bossDead = false; this.xpGained = 0; this.startLevel = this.char.level; this.bossDef = null; this.unlocked = [];
+    this.invuln = 0; this.time_ = 0; this.kills = 0; this.total = 0; this.regenAcc = 0;
+    this.xpGained = 0; this.startLevel = this.char.level; this.bossDef = null; this.unlocked = [];
     this.enemies = []; this.shots = []; this.zones = []; this.drops = []; this.states = []; this.icons = [];
+    this.packs = []; this.eshots = []; this.teles = []; this.flowKey = -1; this.flowT = 0; this.mmDirty = false; this.mmT = 0;
     this.fx = { frenzyT: 0, frenzyDmg: 0, frenzySpd: 0, hasteT: 0, hasteCdr: 0, shield: 0, shieldT: 0 };
     this.over = false; this.popCount = 0; this.fxCount = 0; this.found = 0; this.stickOrigin = null; this.quitArmed = false;
   }
 
   create(): void {
     setupCam(this);
-    this.cameras.main.setBackgroundColor(0x0a0814);
-    this.bg = this.add.tileSprite(0, 0, W, H, 'ground').setOrigin(0).setScrollFactor(0);
-    this.player = spr(this, 0, 0, `pl_${this.char.cls}`).setDepth(10);
-    this.cameras.main.setScroll(-W / 2, -H / 2);
+    const seed = Math.floor(Math.random() * 1e9);
+    this.map = generateMap(this.mode.size, seed);
+    this.cameras.main.setBackgroundColor(this.map.biome.void);
+    this.mapView = buildMapImages(this, this.map, seed);
+    this.flow = new Int16Array(this.map.w * this.map.h);
+    this.seen = new Uint8Array(this.map.w * this.map.h);
+    this.player = spr(this, (this.map.start[0] + 0.5) * TILE, (this.map.start[1] + 0.5) * TILE, `pl_${this.char.cls}`).setDepth(10);
+    this.cameras.main.setScroll(this.player.x - W / 2, this.player.y - H / 2);
+    this.tgfx = this.add.graphics().setDepth(3);
+    this.events.once('shutdown', () => {
+      this.mapView?.destroy(); this.mapView = null;
+      if (this.textures.exists('mm')) this.textures.remove('mm');
+    });
 
     this.ebars = this.add.graphics().setDepth(40);
     this.warn = this.add.rectangle(0, 0, W, H, 0xff0000, 0).setOrigin(0).setScrollFactor(0).setDepth(90);
@@ -94,6 +118,13 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointerup', () => { this.stickOrigin = null; });
     this.buildStates();
     this.refreshStats();
+    this.populate();
+    this.mmCanvas = this.textures.createCanvas('mm', this.map.w, this.map.h);
+    this.mmCanvas?.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    this.add.rectangle(284, 50, 68, 68, 0x000000, 0.45).setOrigin(0).setScrollFactor(0).setDepth(98).setStrokeStyle(1, 0xffffff, 0.35);
+    this.add.image(284, 50, 'mm').setOrigin(0).setScale(68 / this.map.w).setScrollFactor(0).setDepth(99);
+    this.reveal(true);
+    this.toast(this.map.biome.name, '#c9a4ff');
     this.icons = this.states.map((s, i) => spr(this, W / 2 + (i - (this.states.length - 1) / 2) * 50, H - 30, `ic_${s.id}`).setScale(40 / 44 / S).setScrollFactor(0).setDepth(100));
     Object.assign(window, { __game: this, __mk: makeItem }); // do testów
   }
@@ -144,25 +175,22 @@ export class GameScene extends Phaser.Scene {
     if (this.regenAcc >= 1) { this.heal(Math.floor(this.regenAcc)); this.regenAcc %= 1; }
 
     this.move(dt);
-    this.spawn(dt);
+    this.updateFlow(dt);
     this.states.forEach((s) => (s.kind === 'attack' ? this.cast(s, dt) : s.kind === 'buff' ? this.castBuff(s, dt) : s.kind === 'minion' ? this.minions(s, dt) : undefined));
     this.updateShots(dt);
     this.updateZones(dt);
     this.updateEnemies(dt);
+    this.updateEShots(dt);
+    this.updateTeles(dt);
     this.updateDrops();
+    this.reveal(false, dt);
 
     const cam = this.cameras.main, k = Math.min(1, 9 * dt);
     cam.scrollX += (this.player.x - W / 2 - cam.scrollX) * k;
     cam.scrollY += (this.player.y - H / 2 - cam.scrollY) * k;
-    this.bg.tilePositionX = cam.scrollX;
-    this.bg.tilePositionY = cam.scrollY;
 
     if (this.hp <= 0) this.end(false);
-    else if (this.kills >= this.mode.target) {
-      if (!this.mode.boss) this.end(true);
-      else if (!this.bossSpawned) this.spawnBoss();
-      else if (this.bossDead) this.end(true);
-    }
+    else if (this.enemies.length === 0) this.end(true);
   }
 
   private tickFx(dt: number): void {
@@ -196,45 +224,173 @@ export class GameScene extends Phaser.Scene {
     const v = new Phaser.Math.Vector2(dx, dy);
     if (v.length() > 1) v.normalize();
     const sp = 130 * (1 + this.st.speed);
-    this.player.x += v.x * sp * dt; this.player.y += v.y * sp * dt;
+    this.slide(this.player, v.x * sp * dt, v.y * sp * dt, 8);
   }
 
-  // ---------- przeciwnicy ----------
-  private spawn(dt: number): void {
-    if (this.spawned >= this.mode.target) return;
-    if (this.kills >= this.nextElite && this.mode.eliteEvery > 0) { this.nextElite += this.mode.eliteEvery; this.addEnemy('elite'); return; }
-    this.spawnT -= dt;
-    if (this.enemies.length < 4) this.spawnT = Math.min(this.spawnT, 0.12);
-    if (this.spawnT > 0 || this.enemies.length >= ENEMY_CAP) return;
-    const p = this.spawned / this.mode.target;
-    this.spawnT = Phaser.Math.Linear(this.mode.spawn0, this.mode.spawn1, p);
-    const r = Math.random();
-    this.addEnemy(p > 0.3 && r < 0.18 ? 'tank' : p > 0.12 && r < 0.4 ? 'fast' : 'grunt');
+  /** ruch po osiach z kolizją ze ścianami; zwraca, czy się ruszył */
+  slide(o: { x: number; y: number }, dx: number, dy: number, r: number): boolean {
+    let moved = false;
+    if (dx && this.canStand(o.x + dx, o.y, r)) { o.x += dx; moved = true; }
+    if (dy && this.canStand(o.x, o.y + dy, r)) { o.y += dy; moved = true; }
+    return moved;
   }
 
-  private addEnemy(type: 'grunt' | 'fast' | 'tank' | 'elite' | 'boss'): void {
-    const L = this.char.level, p = this.spawned / this.mode.target;
-    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (type === 'boss' ? 0.5 : p)) * this.mode.hpMul;
-    const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul;
+  /** public na potrzeby testów */
+  moveBy(dx: number, dy: number): void { this.slide(this.player, dx, dy, 8); }
+
+  private solidAt(x: number, y: number): boolean {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE), m = this.map;
+    return tx < 0 || ty < 0 || tx >= m.w || ty >= m.h || m.solid[ty * m.w + tx] === 1;
+  }
+  private canStand(x: number, y: number, r: number): boolean {
+    return !this.solidAt(x - r, y - r) && !this.solidAt(x + r, y - r) && !this.solidAt(x - r, y + r) && !this.solidAt(x + r, y + r);
+  }
+  /** czy linia między punktami nie przechodzi przez ścianę (opcjonalnie z grubością) */
+  private clear(x0: number, y0: number, x1: number, y1: number, thick = 0): boolean {
+    const dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy);
+    if (d < 1) return true;
+    const n = Math.ceil(d / 10), nx = -dy / d * thick, ny = dx / d * thick;
+    for (let i = 1; i < n; i++) {
+      const t = i / n, x = x0 + dx * t, y = y0 + dy * t;
+      if (this.solidAt(x, y) || (thick && (this.solidAt(x + nx, y + ny) || this.solidAt(x - nx, y - ny)))) return false;
+    }
+    return true;
+  }
+  private tileOf(o: { x: number; y: number }): number { return Math.floor(o.y / TILE) * this.map.w + Math.floor(o.x / TILE); }
+
+  /** pole odległości od gracza (BFS), odświeżane przy zmianie kafelka */
+  private updateFlow(dt: number): void {
+    this.flowT -= dt;
+    const k = this.tileOf(this.player);
+    if (k === this.flowKey && this.flowT > 0) return;
+    this.flowKey = k; this.flowT = 0.3;
+    bfs(this.map.solid, this.map.w, this.map.h, k % this.map.w, (k / this.map.w) | 0, this.flow);
+  }
+
+  /** kierunek (jednostkowy) kroku z (x,y) w stronę celu po ścieżce; do testów i botów */
+  pathDir(x: number, y: number, tx: number, ty: number): [number, number] {
+    const m = this.map, f = new Int16Array(m.w * m.h);
+    bfs(m.solid, m.w, m.h, Math.floor(tx / TILE), Math.floor(ty / TILE), f);
+    return this.descend(f, x, y);
+  }
+  private descend(f: Int16Array, x: number, y: number): [number, number] {
+    const m = this.map, cx = Math.floor(x / TILE), cy = Math.floor(y / TILE), here = f[cy * m.w + cx];
+    let best = here < 0 ? 1e9 : here, bx = 0, by = 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || ny < 0 || nx >= m.w || ny >= m.h) continue;
+      const v = f[ny * m.w + nx];
+      if (v < 0 || v >= best) continue;
+      if (dx && dy && (m.solid[cy * m.w + nx] || m.solid[ny * m.w + cx])) continue;
+      best = v; bx = dx; by = dy;
+    }
+    if (!bx && !by) return [0, 0];
+    const ax = (cx + bx + 0.5) * TILE - x, ay = (cy + by + 0.5) * TILE - y, l = Math.hypot(ax, ay) || 1;
+    return [ax / l, ay / l];
+  }
+
+  /** odkrywanie mapy do minimapy */
+  private reveal(force: boolean, dt = 0): void {
+    const m = this.map, cv = this.mmCanvas;
+    if (!cv) return;
+    if (!force) {
+      this.mmT -= dt;
+      if (this.mmT > 0) return;
+    }
+    this.mmT = 0.25;
+    const px = Math.floor(this.player.x / TILE), py = Math.floor(this.player.y / TILE), R = 7, ctx = cv.context;
+    const pal = m.biome;
+    for (let y = py - R; y <= py + R; y++) for (let x = px - R; x <= px + R; x++) {
+      if (x < 0 || y < 0 || x >= m.w || y >= m.h || (x - px) ** 2 + (y - py) ** 2 > R * R) continue;
+      const i = y * m.w + x;
+      if (this.seen[i]) continue;
+      this.seen[i] = 1; this.mmDirty = true;
+      ctx.fillStyle = m.solid[i] ? '#' + pal.void.toString(16).padStart(6, '0') : '#' + pal.rim.toString(16).padStart(6, '0');
+      ctx.fillRect(x, y, 1, 1);
+    }
+    if (this.mmDirty) { cv.refresh(); this.mmDirty = false; }
+  }
+
+
+  // ---------- przeciwnicy: rozmieszczeni na mapie od początku ----------
+  private populate(): void {
+    const m = this.map, md = this.mode, rnd = Math.random;
+    const cand = m.open.filter((i) => m.dist[i] >= 9);
+    const centers: [number, number][] = [];
+    const pick = (): number => {
+      for (let t = 0; t < 40; t++) {
+        const i = cand[Math.floor(rnd() * cand.length)], x = i % m.w, y = (i / m.w) | 0;
+        if (centers.every(([cx, cy]) => (cx - x) ** 2 + (cy - y) ** 2 > 20)) return i;
+      }
+      return cand[Math.floor(rnd() * cand.length)];
+    };
+    const around = (i: number): [number, number] => {
+      const cx = i % m.w, cy = (i / m.w) | 0;
+      for (let t = 0; t < 12; t++) {
+        const x = cx + Math.round((rnd() - 0.5) * 5), y = cy + Math.round((rnd() - 0.5) * 5);
+        if (x > 0 && y > 0 && x < m.w && y < m.h && m.dist[y * m.w + x] >= 6) return [(x + 0.2 + rnd() * 0.6) * TILE, (y + 0.2 + rnd() * 0.6) * TILE];
+      }
+      return [(cx + 0.5) * TILE, (cy + 0.5) * TILE];
+    };
+    const nElite = md.eliteEvery > 0 ? Math.floor(md.target / md.eliteEvery) : 0;
+    let left = md.target - nElite;
+    let pack = 0;
+    const depthOf = (i: number) => m.dist[i] / m.maxDist;
+    const kindFor = (d: number): Kind => {
+      const r = rnd();
+      if (r < 0.12 + 0.2 * d) return 'spitter';
+      if (r < 0.3 + 0.22 * d) return 'runner';
+      if (r < 0.4 + 0.2 * d) return 'brute';
+      return 'grunt';
+    };
+    for (let e = 0; e < nElite; e++) {
+      const i = pick(); centers.push([i % m.w, (i / m.w) | 0]);
+      const d = depthOf(i), grp: Enemy[] = [];
+      const [x, y] = around(i);
+      grp.push(this.makeEnemy('elite', x, y, d, pack));
+      for (let k = 0; k < 2 && left > 0; k++, left--) { const [gx, gy] = around(i); grp.push(this.makeEnemy('grunt', gx, gy, d, pack)); }
+      this.packs.push(grp); pack++;
+    }
+    while (left > 0) {
+      const i = pick(); centers.push([i % m.w, (i / m.w) | 0]);
+      const d = depthOf(i), n = Math.min(left, 3 + Math.floor(rnd() * 3)), grp: Enemy[] = [];
+      const lead = kindFor(d);
+      for (let k = 0; k < n; k++) {
+        const [x, y] = around(i);
+        grp.push(this.makeEnemy(k === 0 || rnd() < 0.35 ? lead : rnd() < 0.7 ? 'grunt' : kindFor(d), x, y, d, pack));
+      }
+      left -= n; this.packs.push(grp); pack++;
+    }
+    if (md.boss) {
+      this.bossDef = pickBoss(this.char.level, this.char.bosses);
+      const grp = [this.makeEnemy('boss', (m.far[0] + 0.5) * TILE, (m.far[1] + 0.5) * TILE, 1, pack)];
+      this.packs.push(grp);
+    }
+    this.total = this.enemies.length;
+  }
+
+  private makeEnemy(kind: Kind, x: number, y: number, depth: number, pack: number): Enemy {
+    const L = this.char.level;
+    const hpScale = (1 + 0.15 * (L - 1)) * (1 + this.mode.ramp * (kind === 'boss' ? 0.5 : depth)) * this.mode.hpMul;
+    const dmgScale = (1 + 0.07 * (L - 1)) * this.mode.dmgMul * (1 + 0.15 * depth);
     const xpScale = (1 + 0.2 * (L - 1)) * this.mode.xpMul;
     let key = 'e_grunt', r = 11, hp = 12, speed = 55, dmg = 8, xp = 1, big = 1;
-    if (type === 'fast') { key = 'e_fast'; r = 9; hp = 7; speed = 95; dmg = 6; xp = 1; }
-    else if (type === 'tank') { key = 'e_tank'; r = 18; hp = 60; speed = 38; dmg = 16; xp = 3; }
-    else if (type === 'elite') { key = 'e_elite'; r = 22; hp = 150; speed = 50; dmg = 14; xp = 12; }
-    else if (type === 'boss' && this.bossDef) { key = 'e_elite'; r = 22 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 24 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
-    if (type !== 'boss') this.spawned++;
-    const a = Math.random() * Math.PI * 2;
-    const obj = spr(this, this.player.x + Math.cos(a) * 400, this.player.y + Math.sin(a) * 400, key).setDepth(type === 'boss' ? 6 : 5);
+    if (kind === 'runner') { key = 'e_fast'; r = 9; hp = 8; speed = 78; dmg = 7; }
+    else if (kind === 'spitter') { key = 'e_spit'; r = 10; hp = 9; speed = 60; dmg = 8; }
+    else if (kind === 'brute') { key = 'e_tank'; r = 18; hp = 60; speed = 38; dmg = 14; xp = 3; }
+    else if (kind === 'elite') { key = 'e_elite'; r = 22; hp = 150; speed = 50; dmg = 12; xp = 12; }
+    else if (kind === 'boss' && this.bossDef) { key = 'e_elite'; r = 22 * this.bossDef.scale; hp = 700 * this.bossDef.hpMul; speed = 42; dmg = 20 * this.bossDef.dmgMul; xp = 90 * this.bossDef.hpMul; big = this.bossDef.scale; }
+    const obj = spr(this, x, y, key).setDepth(kind === 'boss' ? 6 : 5);
     if (big !== 1) obj.setScale(big / S);
-    const e: Enemy = { obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0, elite: type === 'elite', boss: type === 'boss', dead: false };
+    const aff = Math.random() < 0.5 ? 'ring' : 'quake';
+    if (kind === 'elite' && aff === 'quake') obj.setTint(0xc77dff);
+    const e: Enemy = {
+      obj, hp: hp * hpScale, maxHp: hp * hpScale, speed, dmg: dmg * dmgScale, r, xp: xp * xpScale, hitT: 0, slowT: 0, frozenT: 0, burnT: 0, burnDps: 0,
+      elite: kind === 'elite', boss: kind === 'boss', dead: false, kind, awake: false, pack, ph: Math.random() * 6.28, hy: y,
+      st: 'move', stT: 0, cd: 0.5 + Math.random() * 1.5, ax: 0, ay: 0, act: '', stuck: 0, los: false, losT: Math.random() * 0.15, aff, moveI: 0,
+    };
     this.enemies.push(e);
-    if (type === 'boss' && this.bossDef) this.toast(`BOSS: ${this.bossDef.name}`, '#ff5470');
-  }
-
-  private spawnBoss(): void {
-    this.bossSpawned = true;
-    this.bossDef = pickBoss(this.char.level, this.char.bosses);
-    this.addEnemy('boss');
+    return e;
   }
 
   /** osiągnięcia: punkty i powiadomienia */
@@ -243,13 +399,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   private nearestTo(x: number, y: number, maxD = 1e9, skip?: Set<Enemy>): Enemy | null {
-    let best: Enemy | null = null, bd = maxD * maxD;
-    for (const e of this.enemies) {
-      if (skip?.has(e) || e.dead) continue;
-      const d = (e.obj.x - x) ** 2 + (e.obj.y - y) ** 2;
-      if (d < bd) { bd = d; best = e; }
+    const blocked = new Set<Enemy>();
+    for (let tries = 0; tries < 6; tries++) {
+      let best: Enemy | null = null, bd = maxD * maxD;
+      for (const e of this.enemies) {
+        if (skip?.has(e) || e.dead || blocked.has(e)) continue;
+        const d = (e.obj.x - x) ** 2 + (e.obj.y - y) ** 2;
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (!best) return null;
+      if (this.clear(x, y, best.obj.x, best.obj.y)) return best;
+      blocked.add(best);
     }
-    return best;
+    return null;
   }
   private dist(a: { x: number; y: number }, b: { x: number; y: number }): number { return Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y); }
 
@@ -403,7 +565,7 @@ export class GameScene extends Phaser.Scene {
           this.hurt(e, dmg, m);
           if (!e.dead && !e.boss) {
             const a = Math.atan2(P.y - e.obj.y, P.x - e.obj.x);
-            e.obj.x += Math.cos(a) * 28; e.obj.y += Math.sin(a) * 28;
+            this.slide(e.obj, Math.cos(a) * 28, Math.sin(a) * 28, Math.min(e.r, 10));
           }
         });
         this.tweens.add({ targets: g, alpha: 0, duration: 220, onComplete: () => g.destroy() });
@@ -512,7 +674,7 @@ export class GameScene extends Phaser.Scene {
       }
       const dx = s.vx * dt, dy = s.vy * dt;
       o.x += dx; o.y += dy; s.life -= dt; s.travelled += Math.hypot(dx, dy);
-      let alive = s.life > 0;
+      let alive = s.life > 0 && !(s.kind !== 'boom' && this.solidAt(o.x, o.y));
       for (const e of this.enemies.slice()) {
         if (!alive) break;
         if (e.dead || s.hit.has(e)) continue;
@@ -541,6 +703,7 @@ export class GameScene extends Phaser.Scene {
   // ---------- trafienia, zabicia, XP ----------
   private hurt(e: Enemy, base: number, m: Mods = NO_MODS): void {
     if (e.dead) return;
+    if (!e.awake) this.wake(e.pack);
     const st = this.st;
     const crit = Math.random() < st.crit + m.crit;
     const v = Math.max(1, base * (1 + st.dmg) * m.dmg * (crit ? 1 + st.critDmg : 1));
@@ -553,7 +716,7 @@ export class GameScene extends Phaser.Scene {
     if (e.hp <= 0) return this.kill(e);
     if (m.knock > 0 && !e.boss) {
       const a = Math.atan2(e.obj.y - this.player.y, e.obj.x - this.player.x);
-      e.obj.x += Math.cos(a) * 18; e.obj.y += Math.sin(a) * 18;
+      this.slide(e.obj, Math.cos(a) * 18, Math.sin(a) * 18, Math.min(e.r, 10));
     }
   }
 
@@ -572,7 +735,6 @@ export class GameScene extends Phaser.Scene {
       this.checkAch(); this.char.save();
     }
     this.rollDrop(e);
-    if (e.boss) this.bossDead = true;
     e.obj.destroy();
     this.enemies.splice(this.enemies.indexOf(e), 1);
   }
@@ -610,7 +772,8 @@ export class GameScene extends Phaser.Scene {
     else if (Math.random() < 0.014 * mult) this.spawnDrop(e, makeItem(ilvl));
   }
   private spawnDrop(e: Enemy, item?: Item, skill?: SkillId, support?: SupportId): void {
-    const x = e.obj.x + Phaser.Math.Between(-12, 12), y = e.obj.y + Phaser.Math.Between(-12, 12);
+    let x = e.obj.x + Phaser.Math.Between(-12, 12), y = e.obj.y + Phaser.Math.Between(-12, 12);
+    if (this.solidAt(x, y)) { x = e.obj.x; y = e.obj.y; }
     const color = item ? RARITY_COLOR[item.rarity] : skill ? 0xd18bff : SUPPORTS[support as SupportId].color;
     const obj = spr(this, x, y, item ? 'drop_item' : skill ? 'drop_star' : 'drop_hex').setTint(color).setDepth(4);
     let beam: Phaser.GameObjects.Image | undefined;
@@ -649,58 +812,204 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: t, y: 78, alpha: 0, delay: 1600, duration: 700, onComplete: () => t.destroy() });
   }
 
+  private wake(pack: number): void {
+    for (const e of this.packs[pack] ?? []) if (!e.dead && !e.awake) { e.awake = true; e.cd = Math.max(e.cd, 0.7 + Math.random() * 0.8); }
+  }
+
+  private hitPlayer(raw: number, inv = 0.5): void {
+    if (this.invuln > 0 || this.over) return;
+    const f = this.fx;
+    let dmg = Math.max(raw * 0.3, raw - Math.min(this.st.armor, raw * 0.7));
+    if (f.shield > 0) { const ab = Math.min(f.shield, dmg); f.shield -= ab; dmg -= ab; }
+    this.hp -= dmg; this.invuln = inv;
+    this.cameras.main.shake(90, 0.006);
+  }
+
+  private tele(x: number, y: number, R: number, t: number, dmg: number, color = 0xff3b3b): void {
+    this.teles.push({ x, y, R, t, t0: t, dmg, color });
+  }
+
+  private enemyShot(e: Enemy, ang: number, spd: number, dmg: number): void {
+    const obj = spr(this, e.obj.x, e.obj.y, 'eshot').setDepth(7);
+    this.eshots.push({ obj, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, life: 3.2, dmg });
+  }
+
+  private windup(e: Enemy, act: string, t: number, ax: number, ay: number): void {
+    e.st = 'wind'; e.stT = t; e.act = act; e.ax = ax; e.ay = ay;
+    if (act === 'slam') this.tele(e.obj.x, e.obj.y, e.boss ? 100 : 64, t, e.dmg * (e.boss ? 1.7 : 1.5));
+  }
+
+  private execute(e: Enemy): void {
+    const P = this.player, b = e.boss;
+    const toward = Math.atan2(P.y - e.obj.y, P.x - e.obj.x);
+    e.st = 'rest'; e.stT = 0.35;
+    switch (e.act) {
+      case 'dash': case 'charge':
+        e.st = 'dash'; e.stT = b ? 0.6 : 0.38; e.cd = b ? 2.4 : 3; break;
+      case 'spit':
+        this.enemyShot(e, toward, 165, e.dmg * 0.9); e.cd = 2.4 + Math.random() * 0.8; break;
+      case 'slam':
+        e.stT = 0.5; e.cd = b ? 2.4 : 3.4; break;
+      case 'ring': {
+        const n = b ? 16 : 10, off = Math.random() * 6.28;
+        for (let i = 0; i < n; i++) this.enemyShot(e, off + (i / n) * 6.28, 120, e.dmg * 0.7);
+        e.cd = b ? 3 : 4.4; break;
+      }
+      case 'quake': {
+        const n = b ? 6 : 3;
+        for (let i = 0; i < n; i++) {
+          const x = P.x + (i ? (Math.random() - 0.5) * 190 : 0), y = P.y + (i ? (Math.random() - 0.5) * 190 : 0);
+          if (!this.solidAt(x, y)) this.tele(x, y, 46, 1.05, e.dmg * 1.2, 0xc77dff);
+        }
+        e.cd = b ? 3.4 : 5; break;
+      }
+      default: break;
+    }
+  }
+
+  private think(e: Enemy, d: number, ux: number, uy: number, chase: (sp: number) => void, dt: number): void {
+    const rr = Math.min(e.r, 11);
+    switch (e.kind) {
+      case 'runner':
+        chase(e.speed);
+        if (e.cd <= 0 && e.los && d < 170 && d > 50) this.windup(e, 'dash', 0.5, ux, uy);
+        break;
+      case 'spitter':
+        if (d < 115) {
+          if (!this.slide(e.obj, -ux * e.speed * dt, -uy * e.speed * dt, rr)) this.slide(e.obj, -uy * e.speed * dt, ux * e.speed * dt, rr);
+        } else if (d > 200 || !e.los) chase(e.speed);
+        if (e.cd <= 0 && e.los && d < 270) this.windup(e, 'spit', 0.35, ux, uy);
+        break;
+      case 'brute':
+        chase(e.speed);
+        if (e.cd <= 0 && d < 85) this.windup(e, 'slam', 0.8, ux, uy);
+        break;
+      case 'elite':
+        chase(e.speed);
+        if (e.cd <= 0 && e.los && d < 300) this.windup(e, e.aff, e.aff === 'ring' ? 0.5 : 0.4, ux, uy);
+        break;
+      case 'boss': {
+        chase(e.speed);
+        const mv = this.bossDef?.moves ?? ['slam'];
+        if (e.cd <= 0 && d < 400) { const act = mv[e.moveI++ % mv.length]; this.windup(e, act, act === 'slam' ? 0.9 : act === 'charge' ? 0.7 : 0.55, ux, uy); }
+        break;
+      }
+      default: chase(e.speed);
+    }
+  }
+
   private updateEnemies(dt: number): void {
-    const armor = this.st.armor, f = this.fx;
-    this.ebars.clear();
+    const P = this.player, g = this.ebars, f = this.fx, cam = this.cameras.main;
+    g.clear();
     for (const e of this.enemies.slice()) {
+      const ex = e.obj.x, ey = e.obj.y;
       if (e.hitT > 0) e.hitT = Math.max(0, e.hitT - dt);
       if (e.burnT > 0) { e.burnT -= dt; e.hp -= e.burnDps * dt; if (e.hp <= 0) { this.kill(e); continue; } }
       if (e.slowT > 0) e.slowT -= dt;
       if (e.frozenT > 0) e.frozenT -= dt;
+      const winding = e.st === 'wind';
       if (e.hitT > 0.28) e.obj.setTintFill(0xffffff);
+      else if (winding) e.obj.setTint(0xff7070);
       else if (e.frozenT > 0 || e.slowT > 0) e.obj.setTint(0x8fc4ff);
       else if (e.burnT > 0) e.obj.setTint(0xffa060);
       else if (e.boss && this.bossDef) e.obj.setTint(this.bossDef.tint);
+      else if (e.elite && e.aff === 'quake') e.obj.setTint(0xc77dff);
       else e.obj.clearTint();
-      const sf = e.frozenT > 0 ? 0 : e.slowT > 0 ? 0.5 : 1;
-      const a = Math.atan2(this.player.y - e.obj.y, this.player.x - e.obj.x);
-      e.obj.x += Math.cos(a) * e.speed * sf * dt; e.obj.y += Math.sin(a) * e.speed * sf * dt;
-      if (e.elite || e.boss || (e.hp < e.maxHp * 0.999 && e.r >= 18)) {
-        const w = e.r * 2.2, bx = e.obj.x - w / 2, by = e.obj.y - e.r - 14;
-        this.ebars.fillStyle(0x000000, 0.8).fillRect(bx - 1, by - 1, w + 2, 7);
-        this.ebars.fillStyle(e.boss ? 0xff3b3b : e.elite ? 0xff9f1a : 0xc77dff).fillRect(bx, by, w * Math.max(0, e.hp / e.maxHp), 5);
+
+      if (!e.awake) {
+        if ((ex - P.x) ** 2 + (ey - P.y) ** 2 < 420 * 420) {
+          const fl = this.flow[this.tileOf(e.obj)];
+          if (fl >= 0 && fl <= (e.boss ? 11 : WAKE_STEPS)) this.wake(e.pack);
+        }
+        if (!e.awake) { e.obj.y = e.hy + Math.sin(this.time_ * 2 + e.ph) * 1.2; this.enemyBar(e, cam); continue; }
       }
-      if (this.invuln <= 0 && this.dist(e.obj, this.player) < e.r + 12) {
-        let dmg = Math.max(e.dmg * 0.3, e.dmg - Math.min(armor, e.dmg * 0.7));
-        if (f.shield > 0) { const ab = Math.min(f.shield, dmg); f.shield -= ab; dmg -= ab; }
-        this.hp -= dmg; this.invuln = 0.6;
-        this.cameras.main.shake(90, 0.006);
+
+      e.cd -= dt; e.losT -= dt; if (e.stuck > 0) e.stuck -= dt;
+      const dx = P.x - ex, dy = P.y - ey, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      if (e.losT <= 0) { e.losT = 0.15; e.los = this.clear(ex, ey, P.x, P.y, e.r > 14 ? 9 : 5); }
+      const sf = e.frozenT > 0 ? 0 : e.slowT > 0 ? 0.5 : 1, rr = Math.min(e.r, 11);
+      const chase = (sp: number) => {
+        let mx = ux, my = uy;
+        if (!e.los || e.stuck > 0) [mx, my] = this.descend(this.flow, e.obj.x, e.obj.y);
+        if (!this.slide(e.obj, mx * sp * sf * dt, my * sp * sf * dt, rr) && sf > 0) e.stuck = 0.5;
+      };
+      if (sf > 0) {
+        if (e.st === 'wind') { e.stT -= dt; if (e.stT <= 0) this.execute(e); }
+        else if (e.st === 'dash') {
+          e.stT -= dt;
+          const ok = this.slide(e.obj, e.ax * (e.boss ? 330 : 310) * dt, e.ay * (e.boss ? 330 : 310) * dt, rr);
+          if (!ok || e.stT <= 0) { e.st = 'rest'; e.stT = 0.5; }
+        } else if (e.st === 'rest') { e.stT -= dt; if (e.stT <= 0) e.st = 'move'; }
+        else this.think(e, d, ux, uy, chase, dt);
       }
+      e.hy = e.obj.y;
+      this.enemyBar(e, cam);
+      if (this.dist(e.obj, P) < e.r + 12) this.hitPlayer(e.st === 'dash' ? e.dmg * 1.3 : e.dmg);
     }
     this.player.setAlpha(this.invuln > 0 ? 0.55 + 0.45 * Math.abs(Math.sin(this.time_ * 30)) : 1);
     if (f.frenzyT > 0) this.player.setTint(0xff9a7a); else this.player.clearTint();
     // aury i tarcza wokół gracza
-    const g = this.ebars, P = this.player;
     let ri = 0;
     for (const s of this.states) if (s.kind === 'aura') { g.lineStyle(2, SKILLS[s.id].color, 0.35 + 0.15 * Math.sin(this.time_ * 3 + ri)).strokeCircle(P.x, P.y, 26 + ri * 4); ri++; }
     if (f.shield > 0) g.lineStyle(3, 0x8fd3ff, 0.9).strokeCircle(P.x, P.y, 24);
+  }
+
+  private enemyBar(e: Enemy, cam: Phaser.Cameras.Scene2D.Camera): void {
+    if (!(e.elite || e.boss || (e.hp < e.maxHp * 0.999 && e.r >= 18))) return;
+    if (e.obj.x < cam.scrollX - 40 || e.obj.x > cam.scrollX + W + 40 || e.obj.y < cam.scrollY - 40 || e.obj.y > cam.scrollY + H + 40) return;
+    const g = this.ebars, w = e.r * 2.2, bx = e.obj.x - w / 2, by = e.obj.y - e.r - 14;
+    g.fillStyle(0x000000, 0.8).fillRect(bx - 1, by - 1, w + 2, 7);
+    g.fillStyle(e.boss ? 0xff3b3b : e.elite ? 0xff9f1a : 0xc77dff).fillRect(bx, by, w * Math.max(0, e.hp / e.maxHp), 5);
+  }
+
+  private updateEShots(dt: number): void {
+    this.eshots = this.eshots.filter((s) => {
+      const o = s.obj;
+      o.x += s.vx * dt; o.y += s.vy * dt; s.life -= dt;
+      let alive = s.life > 0 && !this.solidAt(o.x, o.y);
+      if (alive && this.dist(o, this.player) < 12) { this.hitPlayer(s.dmg, 0.4); alive = false; }
+      if (!alive) o.destroy();
+      return alive;
+    });
+  }
+
+  private updateTeles(dt: number): void {
+    const g = this.tgfx, P = this.player;
+    g.clear();
+    for (const e of this.enemies) {
+      if (e.st === 'wind' && (e.act === 'dash' || e.act === 'charge')) {
+        const len = (e.boss ? 330 * 0.6 : 310 * 0.38) + e.r;
+        g.lineStyle(e.r * 1.4, 0xff3b3b, 0.22).lineBetween(e.obj.x, e.obj.y, e.obj.x + e.ax * len, e.obj.y + e.ay * len);
+      }
+    }
+    this.teles = this.teles.filter((t) => {
+      t.t -= dt;
+      const k = 1 - Math.max(0, t.t) / t.t0;
+      g.fillStyle(t.color, 0.1 + 0.08 * k).fillCircle(t.x, t.y, t.R);
+      g.lineStyle(2, t.color, 0.85).strokeCircle(t.x, t.y, t.R);
+      g.fillStyle(t.color, 0.22 + 0.2 * k).fillCircle(t.x, t.y, t.R * k);
+      if (t.t > 0) return true;
+      const boom = this.add.circle(t.x, t.y, t.R, t.color, 0.6).setDepth(9);
+      this.tweens.add({ targets: boom, alpha: 0, scale: 1.25, duration: 260, onComplete: () => boom.destroy() });
+      if (this.dist(P, t) < t.R + 8) this.hitPlayer(t.dmg, 0.4);
+      return false;
+    });
   }
 
   // ---------- koniec i HUD ----------
   private end(win: boolean): void {
     this.over = true; this.stick.clear();
     const c = this.char, md = this.mode;
-    const gold = Math.floor((this.kills * 0.8 + this.time_ / 10) * (1 + this.st.gold) * md.goldMul * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
+    const gold = Math.floor((this.kills * 0.8) * (1 + this.st.gold) * md.goldMul * (win ? 1 : 0.5)) + (win ? 40 * md.goldMul : 0);
     c.gold += gold; c.runs++; c.totals.runs++; if (win) { c.wins++; c.totals.wins++; if (md.boss) c.totals.longWins++; }
     this.checkAch();
     c.save();
     const w = W;
     const dim = this.add.rectangle(0, 0, w, H, 0x000000, 0.8).setOrigin(0).setScrollFactor(0).setDepth(200).setInteractive();
-    const m = Math.floor(this.time_ / 60), s = Math.floor(this.time_ % 60).toString().padStart(2, '0');
     const gained = c.level - this.startLevel;
     this.add.text(w / 2, 200, win ? 'ZWYCIĘSTWO' : 'KONIEC WYPRAWY', { fontSize: '32px', color: win ? '#4ade80' : '#c9a4ff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     this.add.text(w / 2, 232, md.name, { fontSize: '13px', color: '#a8b0d0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
-    this.add.text(w / 2, 335, `Pokonani: ${this.kills} / ${md.target}\nCzas: ${m}:${s}\nZnalezione: ${this.found}\n\n+${Math.round(this.xpGained)} XP${gained > 0 ? `  (poziom ${c.level}, +${gained} pkt drzewka)` : ''}\n+${gold} złota${this.unlocked.length ? '\nOsiągnięcia: ' + this.unlocked.join(', ') : ''}`, { fontSize: '17px', color: '#fff', align: 'center', lineSpacing: 5, wordWrap: { width: 330 } }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+    this.add.text(w / 2, 335, `Pokonani: ${this.kills} / ${this.total}\nZnalezione: ${this.found}\n\n+${Math.round(this.xpGained)} XP${gained > 0 ? `  (poziom ${c.level}, +${gained} pkt drzewka)` : ''}\n+${gold} złota${this.unlocked.length ? '\nOsiągnięcia: ' + this.unlocked.join(', ') : ''}`, { fontSize: '17px', color: '#fff', align: 'center', lineSpacing: 5, wordWrap: { width: 330 } }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     this.add.text(w / 2, 520, 'Dotknij, aby wrócić', { fontSize: '14px', color: '#8892b0' }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
     dim.on('pointerdown', () => this.scene.start('menu'));
   }
@@ -723,14 +1032,24 @@ export class GameScene extends Phaser.Scene {
     if (this.fx.shield > 0) { b.fillStyle(0x8fd3ff, 0.9).fillRect(10, 18, Math.min(136, 136 * this.fx.shield / ch.maxHp), 5); }
     this.hpTxt.setText(`${Math.max(0, Math.ceil(this.hp))} / ${ch.maxHp}`);
     // postęp: liczba wrogów
-    const pr = Math.min(1, this.kills / md.target), bx = 160, bw = 100;
+    const pr = Math.min(1, this.kills / Math.max(1, this.total)), bx = 160, bw = 100;
     b.fillStyle(0x000000, 0.75).fillRect(bx, 16, bw, 24);
     b.fillStyle(md.color).fillRect(bx + 2, 18, (bw - 4) * pr, 20);
     b.fillStyle(0xffffff, 0.22).fillRect(bx + 2, 18, (bw - 4) * pr, 6);
     b.lineStyle(2, 0xffffff, 0.8).strokeRect(bx, 16, bw, 24);
-    this.killTxt.setPosition(bx + bw / 2, 20).setText(this.kills >= md.target && md.boss && !this.bossDead ? 'BOSS' : `${this.kills} / ${md.target}`);
-    const m = Math.floor(this.time_ / 60), s = Math.floor(this.time_ % 60).toString().padStart(2, '0');
-    this.hudTxt.setText(`Poziom ${ch.level}      ${m}:${s}`);
+    this.killTxt.setPosition(bx + bw / 2, 20).setText(this.enemies.length === 1 && this.enemies[0].boss ? 'BOSS' : `${this.kills} / ${this.total}`);
+    this.hudTxt.setText(`Poziom ${ch.level}`);
+    // minimapa: wrogowie tylko na odkrytym terenie, a gdy zostało ich mało — wszyscy
+    {
+      const mw = this.map.w, sc = 68 / mw, showAll = this.enemies.length <= 15;
+      for (const e of this.enemies) {
+        const tx = Math.floor(e.obj.x / TILE), ty = Math.floor(e.obj.y / TILE);
+        if (!showAll && !this.seen[ty * mw + tx]) continue;
+        const sz = e.boss ? 5 : e.elite ? 3.5 : 2.2;
+        b.fillStyle(e.boss ? 0xff3b3b : e.elite ? 0xffa500 : 0xff6b81).fillRect(284 + (e.obj.x / TILE) * sc - sz / 2, 50 + (e.obj.y / TILE) * sc - sz / 2, sz, sz);
+      }
+      b.fillStyle(0x8fffd0).fillRect(284 + (this.player.x / TILE) * sc - 2, 50 + (this.player.y / TILE) * sc - 2, 4, 4);
+    }
     // ikony umiejętności z odliczaniem
     this.states.forEach((st, i) => {
       const ic = this.icons[i];

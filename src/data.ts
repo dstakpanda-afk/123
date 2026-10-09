@@ -83,11 +83,11 @@ export const xpNeed = (level: number): number => Math.round(30 * Math.pow(1.22, 
 export type ModeId = 'quick' | 'long';
 export interface ModeDef {
   name: string; desc: string; target: number; hpMul: number; dmgMul: number; xpMul: number; goldMul: number;
-  eliteEvery: number; boss: boolean; spawn0: number; spawn1: number; ramp: number; color: number;
+  eliteEvery: number; boss: boolean; size: number; ramp: number; color: number;
 }
 export const MODES: Record<ModeId, ModeDef> = {
-  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–2 min · 120 wrogów', target: 120, hpMul: 0.8, dmgMul: 0.8, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, spawn0: 0.7, spawn1: 0.5, ramp: 0.4, color: 0x4ade80 },
-  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 5 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.6, dmgMul: 1.3, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, spawn0: 0.65, spawn1: 0.4, ramp: 0.9, color: 0xff4d6d },
+  quick: { name: 'SZYBKA WYPRAWA', desc: 'ok. 1–3 min · 120 wrogów na mapie', target: 120, hpMul: 0.6, dmgMul: 0.6, xpMul: 1, goldMul: 1, eliteEvery: 30, boss: false, size: 40, ramp: 0.4, color: 0x4ade80 },
+  long: { name: 'WIELKA WYPRAWA', desc: 'ok. 4–6 min · 500 wrogów i boss\ntrudniejsza, ale ×2 XP i ×3 złota', target: 500, hpMul: 1.6, dmgMul: 1.3, xpMul: 2, goldMul: 3, eliteEvery: 35, boss: true, size: 56, ramp: 0.9, color: 0xff4d6d },
 };
 
 // ---------- supporty ----------
@@ -141,12 +141,13 @@ export const CLASSES: Record<ClassId, ClassDef> = {
 export const CLASS_IDS: ClassId[] = ['blood', 'star', 'void', 'deep', 'dream', 'bone'];
 
 // ---------- bossowie i osiągnięcia (jednorazowe punkty drzewka) ----------
-export interface BossDef { id: string; name: string; minLevel: number; hpMul: number; dmgMul: number; scale: number; tint: number }
+export type BossMove = 'slam' | 'ring' | 'quake' | 'charge';
+export interface BossDef { id: string; name: string; minLevel: number; hpMul: number; dmgMul: number; scale: number; tint: number; moves: BossMove[] }
 export const BOSSES: BossDef[] = [
-  { id: 'guard', name: 'Strażnik Progu', minLevel: 1, hpMul: 1, dmgMul: 1, scale: 1.7, tint: 0xff7070 },
-  { id: 'devourer', name: 'Pożeracz Gwiazd', minLevel: 10, hpMul: 1.5, dmgMul: 1.2, scale: 1.9, tint: 0xffd36b },
-  { id: 'mother', name: 'Matka Otchłani', minLevel: 20, hpMul: 2.2, dmgMul: 1.4, scale: 2.1, tint: 0xc77dff },
-  { id: 'nameless', name: 'Bezimienny', minLevel: 30, hpMul: 3.2, dmgMul: 1.7, scale: 2.3, tint: 0x6ee7ff },
+  { id: 'guard', name: 'Strażnik Progu', minLevel: 1, hpMul: 1, dmgMul: 1, scale: 1.7, tint: 0xff7070, moves: ['slam', 'charge'] },
+  { id: 'devourer', name: 'Pożeracz Gwiazd', minLevel: 10, hpMul: 1.5, dmgMul: 1.2, scale: 1.9, tint: 0xffd36b, moves: ['ring', 'charge', 'slam'] },
+  { id: 'mother', name: 'Matka Otchłani', minLevel: 20, hpMul: 2.2, dmgMul: 1.4, scale: 2.1, tint: 0xc77dff, moves: ['quake', 'ring', 'slam'] },
+  { id: 'nameless', name: 'Bezimienny', minLevel: 30, hpMul: 3.2, dmgMul: 1.7, scale: 2.3, tint: 0x6ee7ff, moves: ['quake', 'ring', 'charge', 'slam'] },
 ];
 export const BOSS_POINTS = 3;
 /** pierwszy jeszcze niepokonany boss dostępny na tym poziomie, a gdy wszystkie pokonane: najwyższy dostępny */

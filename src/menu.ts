@@ -32,7 +32,7 @@ export class MenuScene extends Phaser.Scene {
       const md = MODES[id], y = 200 + i * 80;
       const r = this.add.rectangle(w / 2, y, 330, 72, id === 'quick' ? 0x1d3d2c : 0x4a1f2b).setStrokeStyle(3, md.color).setInteractive();
       this.add.text(w / 2, y - 24, md.name, { fontSize: '18px', color: hex(md.color), fontStyle: 'bold' }).setOrigin(0.5);
-      this.add.text(w / 2, id === 'long' ? y + 12 : y + 6, id === 'long' ? `ok. 5 min · 500 wrogów · ×2 XP, ×3 złota\nboss: ${boss.name}${c.bosses[boss.id] ? '' : ` · 1. raz: +${BOSS_POINTS} pkt`}` : md.desc, { fontSize: '12px', color: '#e4e9ff', align: 'center', lineSpacing: 2 }).setOrigin(0.5);
+      this.add.text(w / 2, id === 'long' ? y + 12 : y + 6, id === 'long' ? `ok. 4–6 min · 500 wrogów · ×2 XP, ×3 złota\nboss: ${boss.name}${c.bosses[boss.id] ? '' : ` · 1. raz: +${BOSS_POINTS} pkt`}` : md.desc, { fontSize: '12px', color: '#e4e9ff', align: 'center', lineSpacing: 2 }).setOrigin(0.5);
       r.on('pointerup', () => this.scene.start('game', { mode: id }));
     });
     const pts = c.points > 0 ? ` (${c.points})` : '';
